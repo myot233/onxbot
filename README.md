@@ -7,22 +7,26 @@ TypeScript monorepo 对话机器人。QQ 通过 OneBot v11 接入，Koishi 以�
 - Node.js 24+、pnpm 10 workspace、TypeScript 6、ESM。
 - Koishi 4 + `koishi-plugin-adapter-onebot`，正向 WebSocket；按需加载 HTTP/WebSocket **客户端**服务。
 - PostgreSQL 18 + `pg` 连接池 + Kysely 类型安全 SQL 与迁移。
-- `ts-pattern` 做请求和模型配置的穷尽匹配，`lodash-es` 裁剪对话上下文，Zod 校验环境变量和模型响应。
+- `ts-pattern` 做请求、模型配置和执行结果的穷尽匹配，`lodash-es` 选择完整历史回合，Zod 校验配置、模型响应与工具参数。
 - Vitest 测试、Biome 格式化与检查、TypeScript project references 增量构建。
 
 ## 目录与依赖
 
 ```text
 apps/bot                     读取配置、组装依赖、连接 OneBot、进程退出
-packages/core                对话服务、存储接口、echo / OpenAI 兼容 provider
+packages/model               模型消息与工具协议、echo / OpenAI 兼容 provider
+packages/core                ChatService 应用入口
+packages/core/src/conversation  会话读写顺序、完整回合提交、存储接口
+packages/core/src/context     人格、历史、上下文来源与预算
+packages/core/src/turn        模型与工具执行循环、参数校验
 packages/database            Kysely schema、迁移、PostgreSQL 会话存储
 packages/koishi-plugin-chat   将 Koishi 指令映射为对话请求
 tests                        模型协议、配置、真实 PG 和 OneBot 协议集成测试
 ```
 
-调用链：`QQ → OneBot → Koishi 插件 → ChatService → provider / ConversationStore → PostgreSQL`。
+调用链：`QQ → OneBot → Koishi 插件 → ChatService → ConversationService → ContextBuilder → TurnRunner → ModelProvider / 工具`；成功回合经 `ConversationStore` 写入 PostgreSQL。
 
-`core` 不导入 Koishi、Kysely 或 pg，`database` 只依赖核心存储接口。以后更换消息框架时，可以保留对话与存储实现。
+`model` 独立于 `core`；`core` 不导入 Koishi、Kysely 或 pg。`database` 实现 `@onxbot/core/conversation` 的存储接口，并使用统一模型消息类型。完整职责、数据流与扩展方式见 [AI 对话系统模块设计](docs/architecture.md)。
 
 ## 本地启动
 
@@ -69,7 +73,7 @@ OPENAI_API_KEY=你的密钥
 OPENAI_MODEL=你的模型名称
 ```
 
-支持 OpenAI 兼容的 `/chat/completions` 接口，当前采用非流式文本回复。`OPENAI_BASE_URL` 应包含 API 前缀，例如 `/v1`。消息作为普通文本发送，模型生成的 Koishi 元素标签不会被当作 @、图片等指令执行。
+支持 OpenAI 兼容的 `/chat/completions` 接口，采用非流式回复；模型包支持文本与 function tool calls。当前应用默认不注册工具，增加工具时在应用装配处注入 `TurnRunner`，示例见设计文档。`OPENAI_BASE_URL` 应包含 API 前缀，例如 `/v1`。消息作为普通文本发送，模型生成的 Koishi 元素标签不会被当作 @、图片等指令执行。
 
 ### 构建与运行
 
@@ -98,9 +102,11 @@ TEST_DATABASE_URL=postgresql://onxbot:onxbot_dev@127.0.0.1:5432/onxbot pnpm test
 
 ## 存储行为
 
-每次成功对话原子写入一对 user / assistant 消息。调用模型失败时回滚，不留下半个回合。同一会话通过 PostgreSQL 行锁串行处理，多进程也共享这一约束；不同会话可并发。
+每次成功对话原子写入用户消息和本轮全部 assistant / tool 消息，包括工具调用与对应结果。调用模型或工具失败时回滚，不留下半个回合。同一会话通过 PostgreSQL 行锁串行处理，多进程也共享这一约束；不同会话可并发。数据库回滚不会撤销外部工具已经产生的效果，执行器不自动重试工具。
 
-当前实现会在模型调用期间持有事务及连接，连接池上限为 10。这适合初始规模，吞吐量增加后可替换 `ConversationStore` 实现。`CHAT_HISTORY_TURNS` 限制传给模型的历史回合数（不是 token 限额），历史记录持续保存在数据库，直到 `/reset` 删除。`CHAT_MAX_INPUT_CHARS` 限制单条输入长度，`CHAT_TIMEOUT_MS` 限制模型请求时间。
+当前实现会在整个回合期间持有事务及连接，连接池上限为 10。这适合初始规模，吞吐量增加后可替换 `ConversationStore` 实现。`CHAT_HISTORY_TURNS` 限制完整历史回合数；一个回合可以包含多条工具消息。`ContextBuilder` 提供可选 token 预算接口，默认应用尚未配置计数器。摘要与长期记忆可通过上下文来源接入，当前尚未内置生成与检索。历史记录持续保存在数据库，直到 `/reset` 删除。`CHAT_MAX_INPUT_CHARS` 限制单条输入长度，`CHAT_TIMEOUT_MS` 限制每次模型请求时间；`TurnRunner` 默认最多请求模型 8 次。
+
+升级已有数据库时执行 `pnpm db:migrate`；增量迁移保留原有对话并增加工具消息字段。
 
 ## Koishi 的使用边界
 

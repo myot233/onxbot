@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { Migrator } from 'kysely/migration';
 import { Pool } from 'pg';
 import { createDatabase, migrate } from '../../packages/database/src/index.js';
+import * as initialMigration from '../../packages/database/src/migrations/001-conversations.js';
 
-export async function createTestDatabase() {
+export async function createTestDatabase(options: { legacy?: boolean } = {}) {
   const connectionString = process.env.TEST_DATABASE_URL;
   if (!connectionString)
     throw new Error(
@@ -15,7 +17,20 @@ export async function createTestDatabase() {
   scoped.searchParams.set('options', `-c search_path=${schema}`);
   const db = createDatabase(scoped.toString());
   try {
-    await migrate(db);
+    if (options.legacy) {
+      const { error } = await new Migrator({
+        db,
+        migrationTableSchema: schema,
+        provider: {
+          async getMigrations() {
+            return { '001-conversations': initialMigration };
+          },
+        },
+      }).migrateToLatest();
+      if (error) throw error;
+    } else {
+      await migrate(db);
+    }
   } catch (error) {
     await db.destroy();
     await admin.query(`drop schema "${schema}" cascade`);

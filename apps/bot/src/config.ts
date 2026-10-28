@@ -1,4 +1,5 @@
-import type { ChatOptions, ProviderConfig } from '@onxbot/core';
+import type { ChatOptions } from '@onxbot/core';
+import type { ProviderConfig } from '@onxbot/model';
 import { match } from 'ts-pattern';
 import { z } from 'zod';
 

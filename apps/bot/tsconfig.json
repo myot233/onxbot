@@ -3,6 +3,7 @@
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src/**/*.ts"],
   "references": [
+    { "path": "../../packages/model" },
     { "path": "../../packages/core" },
     { "path": "../../packages/database" },
     { "path": "../../packages/koishi-plugin-chat" }

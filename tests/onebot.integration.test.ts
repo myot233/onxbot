@@ -4,8 +4,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from '../apps/bot/src/config.js';
 import { createBotRuntime } from '../apps/bot/src/runtime.js';
-import { ChatService, createChatProvider } from '../packages/core/src/index.js';
 import { createConversationStore } from '../packages/database/src/index.js';
+import { createModelProvider } from '../packages/model/src/index.js';
+import { createChat } from './helpers/chat.js';
 import { createTestDatabase } from './helpers/database.js';
 
 describe('headless Koishi with OneBot v11', () => {
@@ -29,9 +30,9 @@ describe('headless Koishi with OneBot v11', () => {
     });
     const runtime = createBotRuntime(
       config,
-      new ChatService(
+      createChat(
         createConversationStore(fixture.db),
-        createChatProvider(config.provider),
+        createModelProvider(config.provider),
         config.chat,
       ),
     );
