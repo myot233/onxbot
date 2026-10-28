@@ -8,9 +8,15 @@
       "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./conversation": {
+      "development": "./src/conversation/index.ts",
+      "types": "./dist/conversation/index.d.ts",
+      "import": "./dist/conversation/index.js"
     }
   },
   "dependencies": {
+    "@onxbot/model": "workspace:*",
     "lodash-es": "^4.18.1",
     "ts-pattern": "^5.9.2",
     "zod": "^4.6.7"

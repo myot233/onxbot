@@ -1,16 +1,23 @@
-import { ChatService, createChatProvider } from '@onxbot/core';
+import {
+  ChatService,
+  ContextBuilder,
+  ConversationService,
+  TurnRunner,
+} from '@onxbot/core';
 import { createConversationStore, createDatabase } from '@onxbot/database';
+import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
 import { createBotRuntime } from './runtime.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const db = createDatabase(config.databaseUrl);
-  const service = new ChatService(
-    createConversationStore(db),
-    createChatProvider(config.provider),
-    config.chat,
-  );
+  const service = new ChatService({
+    conversations: new ConversationService(createConversationStore(db)),
+    context: new ContextBuilder(config.chat),
+    runner: new TurnRunner(createModelProvider(config.provider)),
+    maxInputChars: config.chat.maxInputChars,
+  });
   const runtime = createBotRuntime(config, service);
   const { context } = runtime;
   const logger = context.logger('onxbot');
@@ -35,7 +42,11 @@ async function main(): Promise<void> {
   process.once('SIGTERM', onSignal);
 
   try {
-    await db.selectFrom('conversations').select('id').limit(0).execute();
+    await db
+      .selectFrom('messages')
+      .select(['id', 'tool_calls', 'tool_call_id'])
+      .limit(0)
+      .execute();
     await context.start();
     logger.info(
       'Started: OneBot %s, provider %s. Commands: /chat <text>, /reset',

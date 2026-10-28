@@ -20,6 +20,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.2
+      kysely:
+        specifier: ^0.29.7
+        version: 0.29.7
       pg:
         specifier: ^8.23.1
         version: 8.23.1
@@ -35,6 +38,9 @@ importers:
       ws:
         specifier: ^8.18.3
         version: 8.22.0
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
   apps/bot:
     dependencies:
@@ -50,6 +56,9 @@ importers:
       '@onxbot/koishi-plugin-chat':
         specifier: workspace:*
         version: link:../../packages/koishi-plugin-chat
+      '@onxbot/model':
+        specifier: workspace:*
+        version: link:../../packages/model
       koishi:
         specifier: 4.18.11
         version: 4.18.11(@cordisjs/plugin-http@0.6.3(cordis@3.18.1))(cordis@3.18.1)
@@ -65,6 +74,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@onxbot/model':
+        specifier: workspace:*
+        version: link:../model
       lodash-es:
         specifier: ^4.18.1
         version: 4.18.1
@@ -84,6 +96,9 @@ importers:
       '@onxbot/core':
         specifier: workspace:*
         version: link:../core
+      '@onxbot/model':
+        specifier: workspace:*
+        version: link:../model
       kysely:
         specifier: ^0.29.7
         version: 0.29.7
@@ -104,6 +119,15 @@ importers:
       koishi:
         specifier: 4.18.11
         version: 4.18.11(@cordisjs/plugin-http@0.6.3(cordis@3.18.1))(cordis@3.18.1)
+
+  packages/model:
+    dependencies:
+      ts-pattern:
+        specifier: ^5.9.2
+        version: 5.9.2
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
 packages:
 

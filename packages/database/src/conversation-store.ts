@@ -1,4 +1,5 @@
-import type { ConversationStore } from '@onxbot/core';
+import type { ConversationStore } from '@onxbot/core/conversation';
+import type { ConversationMessage } from '@onxbot/model';
 import { type Kysely, sql } from 'kysely';
 import type { Database } from './schema.js';
 
@@ -25,17 +26,45 @@ export function createConversationStore(
           .returning('id')
           .executeTakeFirstOrThrow();
         return work({
-          async getMessages(limit) {
-            const rows = await transaction
+          async getRecentTurns(limit) {
+            if (limit === 0) return [];
+            const starts = await transaction
               .selectFrom('messages')
-              .select(['role', 'content'])
+              .select('id')
               .where('conversation_id', '=', conversation.id)
+              .where('role', '=', 'user')
               .orderBy('id', 'desc')
               .limit(limit)
               .execute();
-            return rows.reverse();
+            const start = starts.at(-1)?.id;
+            if (!start) return [];
+            const rows = await transaction
+              .selectFrom('messages')
+              .select(['role', 'content', 'tool_calls', 'tool_call_id'])
+              .where('conversation_id', '=', conversation.id)
+              .where('id', '>=', start)
+              .orderBy('id')
+              .execute();
+            return rows.map((row): ConversationMessage => {
+              if (row.role === 'tool') {
+                if (!row.tool_call_id)
+                  throw new Error('Stored tool result has no call ID.');
+                return {
+                  role: 'tool',
+                  content: row.content,
+                  toolCallId: row.tool_call_id,
+                };
+              }
+              if (row.role === 'assistant' && row.tool_calls)
+                return {
+                  role: 'assistant',
+                  content: row.content,
+                  toolCalls: row.tool_calls,
+                };
+              return { role: row.role, content: row.content };
+            });
           },
-          async appendTurn(input, reply) {
+          async appendTurn(input, output) {
             await transaction
               .insertInto('messages')
               .values([
@@ -43,12 +72,20 @@ export function createConversationStore(
                   conversation_id: conversation.id,
                   role: 'user',
                   content: input,
+                  tool_calls: null,
+                  tool_call_id: null,
                 },
-                {
+                ...output.map((message) => ({
                   conversation_id: conversation.id,
-                  role: 'assistant',
-                  content: reply,
-                },
+                  role: message.role,
+                  content: message.content,
+                  tool_calls:
+                    message.role === 'assistant' && message.toolCalls
+                      ? JSON.stringify(message.toolCalls)
+                      : null,
+                  tool_call_id:
+                    message.role === 'tool' ? message.toolCallId : null,
+                })),
               ])
               .execute();
           },

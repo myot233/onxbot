@@ -2,16 +2,18 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import {
-  type ChatMessage,
-  type ChatProvider,
-  ChatService,
-  createChatProvider,
-} from '../packages/core/src/index.js';
+import { z } from 'zod';
+import { defineTool } from '../packages/core/src/index.js';
 import {
   createConversationStore,
   migrate,
 } from '../packages/database/src/index.js';
+import {
+  createModelProvider,
+  type ModelMessage,
+  type ModelProvider,
+} from '../packages/model/src/index.js';
+import { createChat } from './helpers/chat.js';
 import { createTestDatabase } from './helpers/database.js';
 
 describe('PostgreSQL 18 conversation persistence', () => {
@@ -33,15 +35,15 @@ describe('PostgreSQL 18 conversation persistence', () => {
     historyTurns: 1,
     maxInputChars: 100,
   };
-  const requests: ChatMessage[][] = [];
-  const provider: ChatProvider = {
-    async complete(messages) {
+  const requests: ModelMessage[][] = [];
+  const provider: ModelProvider = {
+    async generate({ messages }) {
       requests.push([...messages]);
-      return `reply:${messages.at(-1)?.content}`;
+      return { type: 'reply', text: `reply:${messages.at(-1)?.content}` };
     },
   };
   const service = () =>
-    new ChatService(createConversationStore(fixture.db), provider, options);
+    createChat(createConversationStore(fixture.db), provider, options);
 
   it('migrates idempotently and keeps context across service instances', async () => {
     await migrate(fixture.db);
@@ -124,10 +126,10 @@ describe('PostgreSQL 18 conversation persistence', () => {
   it('does not persist a failed model turn', async () => {
     const alice = identity('failure-alice');
     await service().execute({ type: 'chat', identity: alice, text: 'fresh' });
-    const failing = new ChatService(
+    const failing = createChat(
       createConversationStore(fixture.db),
       {
-        async complete() {
+        async generate() {
           throw new Error('model unavailable');
         },
       },
@@ -160,7 +162,7 @@ describe('PostgreSQL 18 conversation persistence', () => {
     'stalled-body',
   ] as const)('rolls back and recovers after provider %s', async (failure) => {
     let mode: 'seed' | 'fail' | 'recover' = 'seed';
-    const payloads: Array<{ messages: ChatMessage[] }> = [];
+    const payloads: Array<{ messages: ModelMessage[] }> = [];
     const server = createServer(async (request, response) => {
       let body = '';
       for await (const chunk of request) body += chunk;
@@ -196,9 +198,9 @@ describe('PostgreSQL 18 conversation persistence', () => {
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     try {
-      const chat = new ChatService(
+      const chat = createChat(
         createConversationStore(fixture.db),
-        createChatProvider({
+        createModelProvider({
           type: 'openai',
           baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
           apiKey: 'test-key',
@@ -232,14 +234,14 @@ describe('PostgreSQL 18 conversation persistence', () => {
   });
 
   it('serializes concurrent turns, including the first turn of a new conversation', async () => {
-    const concurrentRequests: ChatMessage[][] = [];
-    const concurrent = new ChatService(
+    const concurrentRequests: ModelMessage[][] = [];
+    const concurrent = createChat(
       createConversationStore(fixture.db),
       {
-        async complete(messages) {
+        async generate({ messages }) {
           concurrentRequests.push([...messages]);
           await new Promise((resolve) => setTimeout(resolve, 30));
-          return `reply:${messages.at(-1)?.content}`;
+          return { type: 'reply', text: `reply:${messages.at(-1)?.content}` };
         },
       },
       options,
@@ -259,5 +261,150 @@ describe('PostgreSQL 18 conversation persistence', () => {
     const first = concurrentRequests[0]?.at(-1)?.content;
     expect(concurrentRequests[1]?.[1]?.content).toBe(first);
     expect(concurrentRequests[1]?.[2]?.content).toBe(`reply:${first}`);
+  });
+
+  it('persists and replays tool transcripts through the HTTP provider without splitting turns', async () => {
+    const payloads: Array<{
+      messages: Array<Record<string, unknown>>;
+      tools: Array<Record<string, unknown>>;
+    }> = [];
+    const server = createServer(async (request, response) => {
+      let body = '';
+      for await (const chunk of request) body += chunk;
+      const payload = JSON.parse(body);
+      payloads.push(payload);
+      const last = payload.messages.at(-1);
+      const message =
+        last.role === 'tool'
+          ? { content: `forecast: ${last.content}` }
+          : last.content === 'weather'
+            ? {
+                content: null,
+                tool_calls: [
+                  {
+                    id: 'weather-1',
+                    type: 'function',
+                    function: {
+                      name: 'weather',
+                      arguments: '{"city":"Hangzhou"}',
+                    },
+                  },
+                ],
+              }
+            : { content: `reply:${last.content}` };
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ choices: [{ message }] }));
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    try {
+      const chat = () =>
+        createChat(
+          createConversationStore(fixture.db),
+          createModelProvider({
+            type: 'openai',
+            baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`,
+            apiKey: 'test-key',
+            model: 'test-model',
+            timeoutMs: 1000,
+          }),
+          options,
+          [
+            defineTool({
+              name: 'weather',
+              description: 'Get weather',
+              input: z.object({ city: z.string() }),
+              async execute({ city }) {
+                return `${city}: sunny`;
+              },
+            }),
+          ],
+        );
+      const who = identity('tool-history');
+      expect(
+        await chat().execute({ type: 'chat', identity: who, text: 'weather' }),
+      ).toBe('forecast: Hangzhou: sunny');
+      expect(payloads[0]?.tools[0]).toMatchObject({
+        type: 'function',
+        function: {
+          name: 'weather',
+          parameters: { type: 'object', required: ['city'] },
+        },
+      });
+      const transcript = [
+        { role: 'user', content: 'weather' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [
+            {
+              id: 'weather-1',
+              type: 'function',
+              function: { name: 'weather', arguments: '{"city":"Hangzhou"}' },
+            },
+          ],
+        },
+        { role: 'tool', content: 'Hangzhou: sunny', tool_call_id: 'weather-1' },
+        { role: 'assistant', content: 'forecast: Hangzhou: sunny' },
+      ];
+      await chat().execute({ type: 'chat', identity: who, text: 'followup' });
+      expect(payloads[2]?.messages).toEqual([
+        { role: 'system', content: 'Be concise.' },
+        ...transcript,
+        { role: 'user', content: 'followup' },
+      ]);
+      await chat().execute({ type: 'chat', identity: who, text: 'another' });
+      expect(payloads[3]?.messages).toEqual([
+        { role: 'system', content: 'Be concise.' },
+        { role: 'user', content: 'followup' },
+        { role: 'assistant', content: 'reply:followup' },
+        { role: 'user', content: 'another' },
+      ]);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
+
+  it('does not commit a partial tool turn when the final model request fails', async () => {
+    const who = identity('tool-failure');
+    await service().execute({ type: 'chat', identity: who, text: 'seed' });
+    let calls = 0;
+    const chat = createChat(
+      createConversationStore(fixture.db),
+      {
+        async generate() {
+          if (calls++ > 0) throw new Error('final request failed');
+          return {
+            type: 'tool-calls',
+            text: '',
+            calls: [{ id: 'c1', name: 'weather', arguments: '{}' }],
+          };
+        },
+      },
+      options,
+      [
+        defineTool({
+          name: 'weather',
+          description: 'Weather',
+          input: z.object({}),
+          async execute() {
+            return 'sunny';
+          },
+        }),
+      ],
+    );
+    await expect(
+      chat.execute({ type: 'chat', identity: who, text: 'failed' }),
+    ).rejects.toThrow('final request failed');
+    await service().execute({ type: 'chat', identity: who, text: 'retry' });
+    expect(requests.at(-1)).toEqual([
+      { role: 'system', content: 'Be concise.' },
+      { role: 'user', content: 'seed' },
+      { role: 'assistant', content: 'reply:seed' },
+      { role: 'user', content: 'retry' },
+    ]);
   });
 });

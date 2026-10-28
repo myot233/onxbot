@@ -1,6 +1,7 @@
 import { type Kysely, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import * as conversations from './migrations/001-conversations.js';
+import * as toolMessages from './migrations/002-tool-messages.js';
 import type { Database } from './schema.js';
 
 export async function migrate(db: Kysely<Database>): Promise<void> {
@@ -17,7 +18,10 @@ export async function migrate(db: Kysely<Database>): Promise<void> {
     migrationTableSchema: schema,
     provider: {
       async getMigrations() {
-        return { '001-conversations': conversations };
+        return {
+          '001-conversations': conversations,
+          '002-tool-messages': toolMessages,
+        };
       },
     },
   });
