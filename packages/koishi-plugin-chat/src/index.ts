@@ -107,10 +107,15 @@ export function apply(context: Context, config: Config): void {
                   : 'group',
               ...(quote && { quote }),
             },
-            async (reply) => {
-              [replyId] =
-                (await session.send([h.at(userId), h.text(` ${reply}`)])) ?? [];
-              return Boolean(replyId);
+            async (reply, index) => {
+              const [id] =
+                (await session.send(
+                  index === 0
+                    ? [h.at(userId), h.text(` ${reply}`)]
+                    : [h.text(reply)],
+                )) ?? [];
+              replyId ??= id;
+              return Boolean(id);
             },
             feedback && messageId
               ? (decision) => {
