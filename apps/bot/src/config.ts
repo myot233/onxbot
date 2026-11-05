@@ -17,6 +17,12 @@ const groupIds = z
   ])
   .pipe(z.array(z.string().regex(/^\d+$/)));
 const environment = z.object({
+  OBSERVE_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
+  OBSERVE_HOST: z.enum(['127.0.0.1', '0.0.0.0']).default('127.0.0.1'),
+  OBSERVE_PASSWORD: z
+    .string()
+    .regex(/^[\x21-\x7e]{24,128}$/)
+    .optional(),
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   ONEBOT_SELF_ID: z.string().regex(/^\d+$/),
   ONEBOT_ENDPOINT: z.url({ protocol: /^wss?$/ }),
@@ -48,6 +54,7 @@ const environment = z.object({
 });
 
 export interface BotConfig {
+  observe?: { host: string; port: number; password: string };
   databaseUrl: string;
   onebot: {
     protocol: 'ws';
@@ -74,6 +81,8 @@ export function loadConfig(
     );
   }
   const env = parsed.data;
+  if (env.OBSERVE_PORT && !env.OBSERVE_PASSWORD)
+    throw new Error('OBSERVE_PASSWORD is required when OBSERVE_PORT is set.');
   const provider = match(env.CHAT_PROVIDER)
     .returnType<ProviderConfig>()
     .with('echo', () => ({ type: 'echo' }))
@@ -92,6 +101,14 @@ export function loadConfig(
     })
     .exhaustive();
   return {
+    ...(env.OBSERVE_PORT &&
+      env.OBSERVE_PASSWORD && {
+        observe: {
+          host: env.OBSERVE_HOST,
+          port: env.OBSERVE_PORT,
+          password: env.OBSERVE_PASSWORD,
+        },
+      }),
     databaseUrl: env.DATABASE_URL,
     onebot: {
       protocol: 'ws',

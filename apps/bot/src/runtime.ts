@@ -16,6 +16,7 @@ export function createBotRuntime(
   service: ChatService,
   groupChat?: GroupChat,
   feedback?: GroupFeedback,
+  observe?: chatPlugin.Config['observe'],
 ): { context: KoishiContext; stop(): Promise<void> } {
   const context = new Context({ prefix: ['/'], prefixMode: 'strict' });
   context.plugin(HTTP);
@@ -27,6 +28,7 @@ export function createBotRuntime(
   });
   context.plugin(chatPlugin, {
     service,
+    ...(observe && { observe }),
     ...(feedback && {
       feedback: { ids: config.feedbackGroupIds, store: feedback },
     }),

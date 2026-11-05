@@ -19,3 +19,8 @@ export interface ModelResponse {
 export interface ModelProvider {
   generate(request: ModelRequest): Promise<ModelResponse>;
 }
+
+export type ModelTrace = (event: {
+  phase: 'input' | 'output';
+  data: unknown;
+}) => void;
