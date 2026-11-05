@@ -134,6 +134,9 @@ importers:
       ai:
         specifier: ^7.0.163
         version: 7.0.163(zod@4.6.7)
+      zod:
+        specifier: ^4.6.7
+        version: 4.6.7
 
 packages:
 
