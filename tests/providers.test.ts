@@ -20,6 +20,7 @@ describe('chat providers', () => {
   it('sends ordered context and authorization to an OpenAI-compatible endpoint', async () => {
     let payload: unknown;
     let authorization: string | undefined;
+    const outputTraces: unknown[] = [];
     const server = createServer(async (request, response) => {
       authorization = request.headers.authorization;
       let body = '';
@@ -30,19 +31,31 @@ describe('chat providers', () => {
       response.end(
         JSON.stringify({
           choices: [{ message: { content: '你好！', tool_calls: [] } }],
+          usage: {
+            prompt_tokens: 130,
+            completion_tokens: 2,
+            total_tokens: 132,
+            prompt_cache_hit_tokens: 128,
+            prompt_cache_miss_tokens: 2,
+          },
         }),
       );
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     try {
-      const provider = createModelProvider({
-        type: 'openai',
-        baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/`,
-        apiKey: 'test-key',
-        model: 'test-model',
-        timeoutMs: 1000,
-      });
+      const provider = createModelProvider(
+        {
+          type: 'openai',
+          baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/`,
+          apiKey: 'test-key',
+          model: 'test-model',
+          timeoutMs: 1000,
+        },
+        ({ phase, data }) => {
+          if (phase === 'output') outputTraces.push(data);
+        },
+      );
       const messages = [
         { role: 'system' as const, content: 'Be concise.' },
         { role: 'user' as const, content: '第一轮' },
@@ -54,6 +67,9 @@ describe('chat providers', () => {
       });
       expect(authorization).toBe('Bearer test-key');
       expect(payload).toMatchObject({ model: 'test-model', messages });
+      expect(outputTraces).toMatchObject([
+        { cache: { hitTokens: 128, missTokens: 2 } },
+      ]);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>

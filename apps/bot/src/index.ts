@@ -51,7 +51,7 @@ async function main(): Promise<void> {
           createHash('sha256')
             .update(
               JSON.stringify([
-                'group-agent-v1',
+                'group-agent-v2',
                 config.provider.model,
                 config.groupSystemPrompt,
               ]),
