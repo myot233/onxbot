@@ -217,7 +217,10 @@ describe('headless Koishi with OneBot v11', () => {
       await mentionReply;
       expect(replies.at(-1)).toMatchObject({
         group_id: 30000,
-        message: [{ type: 'text', data: { text: '我在，慢慢说。' } }],
+        message: [
+          { type: 'at', data: { qq: '20000' } },
+          { type: 'text', data: { text: ' 我在，慢慢说。' } },
+        ],
       });
       expect(
         groupCalls.map(({ messages }) => messages.at(-1)?.content),
@@ -236,6 +239,10 @@ describe('headless Koishi with OneBot v11', () => {
         { type: 'reply', data: { id: '90' } },
       ]);
       await quoteReply;
+      expect(replies.at(-1)?.message).toMatchObject([
+        { type: 'at', data: { qq: '20001' } },
+        { type: 'text', data: { text: ' 我在，慢慢说。' } },
+      ]);
       expect(groupCalls[2]?.messages.at(-2)?.content).toContain('刚才说过的事');
 
       const spontaneousReply = new Promise<void>((resolve) => {
@@ -244,7 +251,13 @@ describe('headless Koishi with OneBot v11', () => {
       sendGroup(30001, 20000, '另一群的消息');
       sendGroup(30001, 20001, '有人知道吗？');
       await spontaneousReply;
-      expect(replies.at(-1)?.group_id).toBe(30001);
+      expect(replies.at(-1)).toMatchObject({
+        group_id: 30001,
+        message: [
+          { type: 'at', data: { qq: '20001' } },
+          { type: 'text', data: { text: ' 我在，慢慢说。' } },
+        ],
+      });
       expect(groupCalls[3]?.messages.at(-2)?.content).not.toContain('浮点数');
       expect(replies.filter((reply) => reply.group_id)).toHaveLength(3);
       expect(context.get('console')).toBeUndefined();

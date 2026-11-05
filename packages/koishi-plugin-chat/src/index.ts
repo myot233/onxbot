@@ -43,10 +43,11 @@ export function apply(context: Context, config: Config): void {
     const { chat, ids } = config.group;
     const enabledGroups = new Set(ids);
     context.on('message', async (session) => {
+      const { userId } = session;
       if (
         session.isDirect ||
-        session.userId === session.selfId ||
-        !session.userId ||
+        userId === session.selfId ||
+        !userId ||
         !session.guildId ||
         !enabledGroups.has(session.guildId)
       )
@@ -66,7 +67,7 @@ export function apply(context: Context, config: Config): void {
         await chat.receive(
           {
             roomId: session.cid,
-            speaker: session.username || session.userId,
+            speaker: session.username || userId,
             text: text || '（叫了你）',
             addressedTo: direct
               ? 'bot'
@@ -75,7 +76,10 @@ export function apply(context: Context, config: Config): void {
                 : 'group',
             ...(quote && { quote }),
           },
-          async (reply) => Boolean((await session.send(h.text(reply)))?.length),
+          async (reply) =>
+            Boolean(
+              (await session.send([h.at(userId), h.text(` ${reply}`)]))?.length,
+            ),
         );
       } catch (error) {
         logger.warn(
