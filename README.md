@@ -77,6 +77,10 @@ OPENAI_MODEL=你的模型名称
 
 模型请求和工具循环由 Vercel AI SDK 执行，支持 OpenAI 兼容的 `/chat/completions`。`OPENAI_BASE_URL` 应设置为服务商的 API 基地址。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
 
+### 定时发起群聊话题
+
+把试点群号同时填入 `CHAT_GROUP_IDS` 和 `CHAT_TOPIC_GROUP_IDS`，并使用真实模型。该群收到第一条可用消息后启动定时任务，每次重新随机等待 15 至 20 分钟。群里有新活动、上次真人发言距今不超过一小时、至少有两条上下文且当前没有回合在跑时，Agent 才会被唤醒。它可以基于近期群聊和群记忆开一个话题，也可以保持沉默。发起话题时面向全群，不 @ 个人。
+
 ### Markdown 记忆
 
 使用真实模型时，Agent 可以在同一回合调用 `send_message`、`list_memory`、`read_memory` 和 `write_memory`。自然群聊只在 Agent 调用 `send_message` 时发送，通常把较长回复拆成两到三条短消息，每条最多 100 字，第一条 @ 触发者。指令 `/chat` 会在数据库提交后回复。默认目录为 `memory/group/<群号>/` 和 `memory/user/<用户号>/`，可以用 `CHAT_MEMORY_DIR` 更换根目录。配置了自然参与的群使用该群目录，私聊 `/chat` 使用该用户目录。

@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   ChatInputError,
@@ -20,7 +21,11 @@ export const name = 'onxbot-chat';
 export interface Config {
   service: ChatService;
   observe?: <T>(session: string, work: () => Promise<T>) => Promise<T>;
-  group?: { ids: readonly string[]; chat: GroupChat };
+  group?: {
+    ids: readonly string[];
+    chat: GroupChat;
+    topicIds?: readonly string[];
+  };
   feedback?: { ids: readonly string[]; store: GroupFeedback };
 }
 
@@ -48,6 +53,14 @@ export function apply(context: Context, config: Config): void {
   const feedbackGroups = new Set(config.feedback?.ids);
   if (config.group) {
     const { chat } = config.group;
+    const topicGroups = new Set(config.group.topicIds);
+    const topicTimers = new Map<string, NodeJS.Timeout>();
+    let stopped = false;
+    context.on('dispose', () => {
+      stopped = true;
+      for (const timer of topicTimers.values()) clearTimeout(timer);
+      topicTimers.clear();
+    });
     context.on('message', async (session) => {
       const { userId, guildId } = session;
       if (
@@ -90,6 +103,45 @@ export function apply(context: Context, config: Config): void {
         return;
       }
       if (text.startsWith('/') || (!text && !direct)) return;
+      const { bot, channelId, platform } = session;
+      if (channelId && topicGroups.has(guildId) && !topicTimers.has(guildId)) {
+        const schedule = () => {
+          if (stopped) return;
+          topicTimers.set(
+            guildId,
+            setTimeout(
+              async () => {
+                try {
+                  if (stopped || !bot.isActive) return;
+                  const run = () =>
+                    chat.initiateTopic(
+                      guildId,
+                      async (reply) =>
+                        !stopped &&
+                        bot.isActive &&
+                        Boolean(
+                          (await bot.sendMessage(channelId, h.text(reply)))
+                            ?.length,
+                        ),
+                    );
+                  if (config.observe)
+                    await config.observe(
+                      `${platform}/${bot.selfId}/group/${guildId}`,
+                      run,
+                    );
+                  else await run();
+                } catch {
+                  logger.warn('Scheduled group topic failed.');
+                } finally {
+                  schedule();
+                }
+              },
+              randomInt(15 * 60_000, 20 * 60_000 + 1),
+            ).unref(),
+          );
+        };
+        schedule();
+      }
       const quote = plainText(session.quote?.elements ?? []);
       const messageId = session.messageId;
       let replyId: string | undefined;
