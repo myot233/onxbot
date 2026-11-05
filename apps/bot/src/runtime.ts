@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { HTTP } from '@koishijs/plugin-http';
-import type { ChatService } from '@onxbot/core';
+import type { ChatService, GroupChat } from '@onxbot/core';
 import * as chatPlugin from '@onxbot/koishi-plugin-chat';
 import type { Context as KoishiContext } from 'koishi';
 import { OneBotBot } from 'koishi-plugin-adapter-onebot';
@@ -14,6 +14,7 @@ const { Context } = createRequire(import.meta.url)(
 export function createBotRuntime(
   config: BotConfig,
   service: ChatService,
+  groupChat?: GroupChat,
 ): { context: KoishiContext; stop(): Promise<void> } {
   const context = new Context({ prefix: ['/'], prefixMode: 'strict' });
   context.plugin(HTTP);
@@ -23,7 +24,13 @@ export function createBotRuntime(
     retryInterval: 5_000,
     retryLazy: 60_000,
   });
-  context.plugin(chatPlugin, { service });
+  context.plugin(chatPlugin, {
+    service,
+    ...(groupChat &&
+      config.groupIds.length && {
+        group: { ids: config.groupIds, chat: groupChat },
+      }),
+  });
   return {
     context,
     async stop() {

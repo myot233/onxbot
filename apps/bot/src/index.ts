@@ -2,6 +2,7 @@ import {
   ChatService,
   ContextBuilder,
   ConversationService,
+  GroupChat,
   TurnRunner,
 } from '@onxbot/core';
 import { createConversationStore, createDatabase } from '@onxbot/database';
@@ -12,13 +13,21 @@ import { createBotRuntime } from './runtime.js';
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const db = createDatabase(config.databaseUrl);
+  const model = createModelProvider(config.provider);
   const service = new ChatService({
     conversations: new ConversationService(createConversationStore(db)),
     context: new ContextBuilder(config.chat),
-    runner: new TurnRunner(createModelProvider(config.provider)),
+    runner: new TurnRunner(model),
     maxInputChars: config.chat.maxInputChars,
   });
-  const runtime = createBotRuntime(config, service);
+  const runtime = createBotRuntime(
+    config,
+    service,
+    new GroupChat(model, {
+      systemPrompt: config.groupSystemPrompt,
+      spontaneous: config.provider.type !== 'echo',
+    }),
+  );
   const { context } = runtime;
   const logger = context.logger('onxbot');
 
