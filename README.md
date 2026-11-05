@@ -79,7 +79,7 @@ OPENAI_MODEL=你的模型名称
 
 ### Markdown 记忆
 
-使用真实模型时，Agent 可以在同一回合调用 `send_message`、`list_memory`、`read_memory` 和 `write_memory`。自然群聊只在 Agent 调用 `send_message` 时发送，指令 `/chat` 会在数据库提交后回复。默认目录为 `memory/group/<群号>/` 和 `memory/user/<用户号>/`，可以用 `CHAT_MEMORY_DIR` 更换根目录。配置了自然参与的群使用该群目录，私聊 `/chat` 使用该用户目录。
+使用真实模型时，Agent 可以在同一回合调用 `send_message`、`list_memory`、`read_memory` 和 `write_memory`。自然群聊只在 Agent 调用 `send_message` 时发送，通常把较长回复拆成两到三条短消息，每条最多 100 字，第一条 @ 触发者。指令 `/chat` 会在数据库提交后回复。默认目录为 `memory/group/<群号>/` 和 `memory/user/<用户号>/`，可以用 `CHAT_MEMORY_DIR` 更换根目录。配置了自然参与的群使用该群目录，私聊 `/chat` 使用该用户目录。
 
 模型可以创建和更新多份按主题命名的 `.md` 文件。`write_memory` 排队后立即返回，后台串行写盘并原子替换文件。队列中的内容可以立即读到，正常退出时会等队列写完。容器部署时应把 `CHAT_MEMORY_DIR` 指到可写的持久卷。`/reset` 清理指令对话历史，Markdown 记忆单独管理。
 

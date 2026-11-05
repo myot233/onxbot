@@ -84,7 +84,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
     await blocked;
     await fs.writeFile(...args);
   });
-  const send = vi.fn(async () => true);
+  const send = vi.fn(async (messages: readonly string[]) => messages);
   let step = 0;
   const agent = new ConversationAgent(
     new TurnRunner(
@@ -97,7 +97,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
             });
           case 1:
             expect(JSON.stringify(messages.at(-1))).toContain('后台写入队列');
-            return call('send_message', { text: '周二见。' });
+            return call('send_message', { messages: ['周二见。'] });
           default:
             return sdkResult([]);
         }
@@ -109,7 +109,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
   try {
     const turn = agent.run(prompt, { kind: 'group', id: '42' }, send);
     await vi.waitFor(() =>
-      expect(send).toHaveBeenCalledExactlyOnceWith('周二见。'),
+      expect(send).toHaveBeenCalledExactlyOnceWith(['周二见。']),
     );
     await expect(
       readFile(join(root, 'group/42/会议.md'), 'utf8'),
@@ -154,6 +154,57 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
     await reloaded.close();
   } finally {
     release();
+    await memory.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('sends each short group reply separately and in order', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
+  const memory = new MarkdownMemory(root, vi.fn());
+  const { promise: first, resolve: release } = Promise.withResolvers<boolean>();
+  const send = vi.fn(async (_text: string, index: number) =>
+    index === 0 ? first : true,
+  );
+  let step = 0;
+  const model = sdkModel(() =>
+    step++ === 0
+      ? call('send_message', {
+          messages: ['可以。', '周二见。', '带上会议记录。'],
+        })
+      : sdkResult([]),
+  );
+  const group = new GroupChat(model, {
+    systemPrompt: 'Be concise.',
+    spontaneous: false,
+    agent: new ConversationAgent(new TurnRunner(model), memory),
+  });
+  const observe = vi.fn();
+  const turn = group.receive(
+    { roomId: '42', addressedTo: 'bot', speaker: 'A', text: '周二怎么安排？' },
+    send,
+    observe,
+  );
+  try {
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledExactlyOnceWith('可以。', 0),
+    );
+    release(true);
+    await turn;
+    expect(send.mock.calls).toEqual([
+      ['可以。', 0],
+      ['周二见。', 1],
+      ['带上会议记录。', 2],
+    ]);
+    expect(observe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'sent',
+        reply: '可以。\n周二见。\n带上会议记录。',
+      }),
+    );
+  } finally {
+    release(false);
+    await turn.catch(() => {});
     await memory.close();
     await rm(root, { recursive: true, force: true });
   }
