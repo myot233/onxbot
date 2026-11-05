@@ -16,7 +16,20 @@ const environment = z.object({
   OPENAI_API_KEY: z.string().trim().default(''),
   OPENAI_MODEL: nonempty.default('gpt-4.1-mini'),
   CHAT_SYSTEM_PROMPT: nonempty.default('你是一个友善、简洁的中文对话助手。'),
+  CHAT_GROUP_SYSTEM_PROMPT: z.string().trim().default(''),
   CHAT_HISTORY_TURNS: z.coerce.number().int().min(0).max(100).default(10),
+  CHAT_GROUP_IDS: z
+    .string()
+    .default('')
+    .transform((value) => [
+      ...new Set(
+        value
+          .split(',')
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ])
+    .pipe(z.array(z.string().regex(/^\d+$/))),
   CHAT_MAX_INPUT_CHARS: z.coerce
     .number()
     .int()
@@ -42,6 +55,8 @@ export interface BotConfig {
   };
   provider: ProviderConfig;
   chat: ChatOptions;
+  groupIds: readonly string[];
+  groupSystemPrompt: string;
 }
 
 export function loadConfig(
@@ -81,6 +96,8 @@ export function loadConfig(
       responseTimeout: 10_000,
     },
     provider,
+    groupIds: env.CHAT_GROUP_IDS,
+    groupSystemPrompt: env.CHAT_GROUP_SYSTEM_PROMPT || env.CHAT_SYSTEM_PROMPT,
     chat: {
       systemPrompt: env.CHAT_SYSTEM_PROMPT,
       historyTurns: env.CHAT_HISTORY_TURNS,
