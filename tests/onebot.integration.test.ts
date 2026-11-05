@@ -1,17 +1,21 @@
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from '../apps/bot/src/config.js';
 import { createBotRuntime } from '../apps/bot/src/runtime.js';
 import { GroupChat } from '../packages/core/src/index.js';
-import { createConversationStore } from '../packages/database/src/index.js';
+import {
+  createConversationStore,
+  createGroupFeedback,
+} from '../packages/database/src/index.js';
 import {
   createModelProvider,
   type ModelRequest,
 } from '../packages/model/src/index.js';
 import { createChat } from './helpers/chat.js';
 import { createTestDatabase } from './helpers/database.js';
+import { textReply } from './helpers/model.js';
 
 describe('headless Koishi with OneBot v11', () => {
   let fixture: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -31,9 +35,11 @@ describe('headless Koishi with OneBot v11', () => {
       ONEBOT_SELF_ID: '10000',
       ONEBOT_TOKEN: 'test-token',
       CHAT_GROUP_IDS: '30000,30001',
+      CHAT_FEEDBACK_GROUP_IDS: '30000',
       ONEBOT_ENDPOINT: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`,
     });
     const groupCalls: ModelRequest[] = [];
+    const feedback = createGroupFeedback(fixture.db, 'test-policy', 'test-key');
     const runtime = createBotRuntime(
       config,
       createChat(
@@ -45,17 +51,16 @@ describe('headless Koishi with OneBot v11', () => {
         {
           async generate(request) {
             groupCalls.push(request);
-            return {
-              type: 'reply',
-              text:
-                request.messages.at(-1)?.content === '只是闲聊'
-                  ? '[[SKIP]]'
-                  : '我在，慢慢说。',
-            };
+            return textReply(
+              request.messages.at(-1)?.content === '只是闲聊'
+                ? '[[SKIP]]'
+                : '我在，慢慢说。',
+            );
           },
         },
         { systemPrompt: '简短、克制、讲证据。', spontaneous: true },
       ),
+      feedback,
     );
     const { context } = runtime;
     const replies: Array<{
@@ -141,11 +146,13 @@ describe('headless Koishi with OneBot v11', () => {
         ],
       });
       const rows = await fixture.db
-        .selectFrom('messages')
+        .selectFrom('conversation_turns')
         .selectAll()
         .orderBy('id')
         .execute();
-      expect(rows.map((row) => row.role)).toEqual(['user', 'assistant']);
+      expect(
+        rows.flatMap((row) => row.messages.map((message) => message.role)),
+      ).toEqual(['user', 'assistant']);
       const literalBodies = [
         'explain $(reset)',
         '-1',
@@ -160,18 +167,22 @@ describe('headless Koishi with OneBot v11', () => {
         });
       }
       const history = await fixture.db
-        .selectFrom('messages')
-        .select('content')
+        .selectFrom('conversation_turns')
+        .select('messages')
         .orderBy('id')
         .execute();
-      expect(history.map((row) => row.content)).toEqual([
+      expect(
+        history.flatMap((row) =>
+          row.messages.map((message) => message.content),
+        ),
+      ).toEqual([
         '你好 <at id="999"/>',
         '收到：你好 <at id="999"/>',
         ...literalBodies.flatMap((body) => [body, `收到：${body}`]),
       ]);
       await send('/reset', 7);
       expect(
-        await fixture.db.selectFrom('messages').selectAll().execute(),
+        await fixture.db.selectFrom('conversation_turns').selectAll().execute(),
       ).toEqual([]);
       await send('/chat', 8);
       expect(JSON.stringify(replies.at(-1)?.message)).toContain(
@@ -260,6 +271,47 @@ describe('headless Koishi with OneBot v11', () => {
       });
       expect(groupCalls[3]?.messages.at(-2)?.content).not.toContain('浮点数');
       expect(replies.filter((reply) => reply.group_id)).toHaveLength(3);
+      await vi.waitFor(async () => {
+        const samples = await fixture.db
+          .selectFrom('group_decisions')
+          .selectAll()
+          .orderBy('message_id')
+          .execute();
+        expect(
+          samples.map(({ group_id, outcome }) => [group_id, outcome]),
+        ).toEqual([
+          ['30000', 'silent'],
+          ['30000', 'sent'],
+          ['30000', 'sent'],
+        ]);
+        expect(samples[1]?.context[0]?.speaker).toBe(1);
+      });
+      const sample = await fixture.db
+        .selectFrom('group_decisions')
+        .select('reply_id')
+        .where('outcome', '=', 'sent')
+        .executeTakeFirstOrThrow();
+      const ratingReply = new Promise<void>((resolve) => {
+        notifyReply = resolve;
+      });
+      sendGroup(30000, 20001, '/bot-feedback interrupt', [
+        { type: 'reply', data: { id: sample.reply_id } },
+      ]);
+      await ratingReply;
+      expect(JSON.stringify(replies.at(-1)?.message)).toContain('已记录反馈');
+      expect(
+        await fixture.db.selectFrom('group_ratings').select('label').execute(),
+      ).toEqual([{ label: 'interrupt' }]);
+      if (!sample.reply_id) throw new Error('Expected a tracked reply ID.');
+      expect(
+        await feedback.rate('30001', sample.reply_id, '20001', 'good'),
+      ).toBe(false);
+      expect(
+        await feedback.rate('30000', sample.reply_id, '20001', 'wrong'),
+      ).toBe(true);
+      expect(
+        await fixture.db.selectFrom('group_ratings').select('label').execute(),
+      ).toEqual([{ label: 'wrong' }]);
       expect(context.get('console')).toBeUndefined();
       expect(context.get('server')).toBeUndefined();
     } finally {

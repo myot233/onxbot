@@ -1,43 +1,20 @@
-export interface ToolCall {
-  id: string;
-  name: string;
-  arguments: string;
-}
+import type { ModelMessage, ToolSet } from 'ai';
 
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: Record<string, unknown>;
-}
-
-export interface AssistantMessage {
-  role: 'assistant';
-  content: string;
-  toolCalls?: readonly ToolCall[];
-}
-
-export interface ToolMessage {
-  role: 'tool';
-  content: string;
-  toolCallId: string;
-}
-
-export type TurnMessage = AssistantMessage | ToolMessage;
-export type ConversationMessage =
-  | { role: 'user'; content: string }
-  | TurnMessage;
-export type ModelMessage =
-  | { role: 'system'; content: string }
-  | ConversationMessage;
+export type { ModelMessage } from 'ai';
+export type TurnMessage = Extract<ModelMessage, { role: 'assistant' | 'tool' }>;
+export type ConversationMessage = Exclude<ModelMessage, { role: 'system' }>;
 
 export interface ModelRequest {
   messages: readonly ModelMessage[];
-  tools?: readonly ToolDefinition[];
+  tools?: ToolSet;
+  maxSteps?: number;
+  prepareMessages?: (output: readonly TurnMessage[]) => readonly ModelMessage[];
 }
 
-export type ModelResponse =
-  | { type: 'reply'; text: string }
-  | { type: 'tool-calls'; text: string; calls: readonly ToolCall[] };
+export interface ModelResponse {
+  text: string;
+  messages: readonly TurnMessage[];
+}
 
 export interface ModelProvider {
   generate(request: ModelRequest): Promise<ModelResponse>;

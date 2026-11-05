@@ -3,6 +3,7 @@ import {
   ContextBuilder,
   ContextLimitError,
 } from '../packages/core/src/index.js';
+import type { TurnMessage } from '../packages/model/src/index.js';
 
 const identity = {
   platform: 'onebot',
@@ -10,6 +11,26 @@ const identity = {
   channelId: '2',
   userId: 'alice',
 };
+
+const toolMessages: TurnMessage[] = [
+  {
+    role: 'assistant',
+    content: [
+      { type: 'tool-call', toolCallId: 'c1', toolName: 'weather', input: {} },
+    ],
+  },
+  {
+    role: 'tool',
+    content: [
+      {
+        type: 'tool-result',
+        toolCallId: 'c1',
+        toolName: 'weather',
+        output: { type: 'text', value: 'sunny' },
+      },
+    ],
+  },
+];
 
 describe('context construction', () => {
   it('keeps complete turns, including tool calls, when selecting history', async () => {
@@ -24,20 +45,14 @@ describe('context construction', () => {
         { role: 'user', content: 'old' },
         { role: 'assistant', content: 'old reply' },
         { role: 'user', content: 'weather' },
-        {
-          role: 'assistant',
-          content: '',
-          toolCalls: [{ id: 'c1', name: 'weather', arguments: '{}' }],
-        },
-        { role: 'tool', content: 'sunny', toolCallId: 'c1' },
+        ...toolMessages,
         { role: 'assistant', content: 'It is sunny.' },
       ],
     });
     expect(context.messages().map((message) => message.content)).toEqual([
       'persona',
       'weather',
-      '',
-      'sunny',
+      ...toolMessages.map((message) => message.content),
       'It is sunny.',
       'next',
     ]);
@@ -95,17 +110,14 @@ describe('context construction', () => {
     });
     expect(context.messages()).toHaveLength(6);
     expect(
-      context
-        .messages([
-          {
-            role: 'assistant',
-            content: '',
-            toolCalls: [{ id: 'c1', name: 'weather', arguments: '{}' }],
-          },
-          { role: 'tool', content: 'sunny', toolCallId: 'c1' },
-        ])
-        .map((message) => message.content),
-    ).toEqual(['s', 'two', 'reply two', 'now', '', 'sunny']);
+      context.messages(toolMessages).map((message) => message.content),
+    ).toEqual([
+      's',
+      'two',
+      'reply two',
+      'now',
+      ...toolMessages.map((message) => message.content),
+    ]);
     expect(() =>
       context.messages(
         Array.from({ length: 6 }, () => ({

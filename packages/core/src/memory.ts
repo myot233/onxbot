@@ -1,0 +1,171 @@
+import { randomUUID } from 'node:crypto';
+import { constants } from 'node:fs';
+import {
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  rename,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
+import { z } from 'zod';
+import { defineTool, type Tool } from './turn/tools.js';
+
+export interface MemoryScope {
+  kind: 'group' | 'user';
+  id: string;
+}
+
+const maxFileBytes = 8_192;
+const filename = z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,59}\.md$/u);
+
+function hasCode(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code;
+}
+
+export class MarkdownMemory {
+  private readonly root: string;
+  private readonly pending = new Map<string, { markdown: string }>();
+  private writes = Promise.resolve();
+  private queued = 0;
+  private closed = false;
+
+  constructor(
+    root: string,
+    private readonly onError: (error: unknown) => void,
+  ) {
+    this.root = resolve(root);
+  }
+
+  tools(scope: MemoryScope): readonly Tool[] {
+    if (!/^\d{1,32}$/.test(scope.id))
+      throw new Error('Invalid memory scope ID.');
+    const parts = [scope.kind, scope.id] as const;
+    const folder = join(this.root, ...parts);
+    return [
+      defineTool({
+        name: 'list_memory',
+        description: '列出当前会话范围内的 Markdown 记忆文件名。',
+        input: z.object({}),
+        execute: async () => {
+          const names = new Set<string>();
+          try {
+            await this.checkFolder(parts, false);
+            for (const entry of await readdir(folder, {
+              withFileTypes: true,
+            })) {
+              if (entry.isFile() && filename.safeParse(entry.name).success)
+                names.add(entry.name);
+            }
+          } catch (error) {
+            if (!hasCode(error, 'ENOENT')) return '记忆目录不可读。';
+          }
+          for (const path of this.pending.keys()) {
+            if (path.startsWith(`${folder}${sep}`))
+              names.add(path.slice(folder.length + 1));
+          }
+          return JSON.stringify([...names].sort());
+        },
+      }),
+      defineTool({
+        name: 'read_memory',
+        description: '按文件名读取当前会话范围内的一份 Markdown 记忆。',
+        input: z.object({ filename }),
+        execute: async ({ filename: name }) => {
+          const path = join(folder, name);
+          const staged = this.pending.get(path);
+          if (staged) return staged.markdown;
+          try {
+            await this.checkFolder(parts, false);
+            const file = await open(
+              path,
+              constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+            );
+            try {
+              if (!(await file.stat()).isFile()) return '记忆文件不可读。';
+              const buffer = Buffer.alloc(maxFileBytes);
+              const { bytesRead } = await file.read(buffer);
+              return buffer.toString('utf8', 0, bytesRead);
+            } finally {
+              await file.close();
+            }
+          } catch (error) {
+            return hasCode(error, 'ENOENT')
+              ? '记忆文件不存在。'
+              : '记忆文件不可读。';
+          }
+        },
+      }),
+      defineTool({
+        name: 'write_memory',
+        description:
+          '按主题新建或替换一份 Markdown 记忆。更新已有文件前先读取，并保留仍有效的内容。写入在后台完成。',
+        input: z.object({
+          filename,
+          content: z.string().trim().min(1).max(8_192),
+        }),
+        execute: async ({ filename: name, content }) => {
+          const markdown = `${content}\n`;
+          if (Buffer.byteLength(markdown) > maxFileBytes)
+            return '文件过大，请精简或分成多份。';
+          if (this.closed || this.queued >= 128)
+            return '记忆写入队列暂不可用。';
+          this.enqueue(parts, join(folder, name), markdown);
+          return '记忆已进入后台写入队列。';
+        },
+      }),
+    ];
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.writes;
+  }
+
+  private enqueue(
+    parts: readonly string[],
+    path: string,
+    markdown: string,
+  ): void {
+    const entry = { markdown };
+    this.pending.set(path, entry);
+    this.queued += 1;
+    this.writes = this.writes
+      .then(async () => {
+        await this.checkFolder(parts, true);
+        const temporary = `${path}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, markdown, { flag: 'wx', mode: 0o600 });
+          await rename(temporary, path);
+        } catch (error) {
+          await unlink(temporary).catch(() => {});
+          throw error;
+        }
+      })
+      .catch(this.onError)
+      .finally(() => {
+        this.queued -= 1;
+        if (this.pending.get(path) === entry) this.pending.delete(path);
+      });
+  }
+
+  private async checkFolder(
+    parts: readonly string[],
+    create: boolean,
+  ): Promise<void> {
+    let folder = this.root;
+    if (create) await mkdir(folder, { recursive: true, mode: 0o700 });
+    for (const part of parts) {
+      folder = join(folder, part);
+      if (create) {
+        await mkdir(folder, { mode: 0o700 }).catch((error: unknown) => {
+          if (!hasCode(error, 'EEXIST')) throw error;
+        });
+      }
+      if (!(await lstat(folder)).isDirectory())
+        throw new Error('Invalid memory directory.');
+    }
+  }
+}

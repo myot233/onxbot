@@ -6,7 +6,7 @@ import {
 } from '../packages/database/src/index.js';
 import { createTestDatabase } from './helpers/database.js';
 
-it('upgrades the original schema without losing existing conversation history', async () => {
+it('starts SDK conversation history empty when migrating a legacy database', async () => {
   const fixture = await createTestDatabase({ legacy: true });
   try {
     const identity = {
@@ -35,10 +35,10 @@ it('upgrades the original schema without losing existing conversation history', 
       identity,
       (session) => session.getRecentTurns(1),
     );
-    expect(history).toEqual([
-      { role: 'user', content: 'before upgrade' },
-      { role: 'assistant', content: 'old reply' },
-    ]);
+    expect(history).toEqual([]);
+    await expect(
+      sql`select * from messages`.execute(fixture.db),
+    ).rejects.toThrow();
   } finally {
     await fixture.close();
   }

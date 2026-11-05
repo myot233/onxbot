@@ -4,6 +4,18 @@ import { match } from 'ts-pattern';
 import { z } from 'zod';
 
 const nonempty = z.string().trim().min(1);
+const groupIds = z
+  .string()
+  .default('')
+  .transform((value) => [
+    ...new Set(
+      value
+        .split(',')
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
+  ])
+  .pipe(z.array(z.string().regex(/^\d+$/)));
 const environment = z.object({
   DATABASE_URL: z.url({ protocol: /^postgres(ql)?$/ }),
   ONEBOT_SELF_ID: z.string().regex(/^\d+$/),
@@ -17,19 +29,10 @@ const environment = z.object({
   OPENAI_MODEL: nonempty.default('gpt-4.1-mini'),
   CHAT_SYSTEM_PROMPT: nonempty.default('你是一个友善、简洁的中文对话助手。'),
   CHAT_GROUP_SYSTEM_PROMPT: z.string().trim().default(''),
+  CHAT_MEMORY_DIR: nonempty.default('memory'),
   CHAT_HISTORY_TURNS: z.coerce.number().int().min(0).max(100).default(10),
-  CHAT_GROUP_IDS: z
-    .string()
-    .default('')
-    .transform((value) => [
-      ...new Set(
-        value
-          .split(',')
-          .map((id) => id.trim())
-          .filter(Boolean),
-      ),
-    ])
-    .pipe(z.array(z.string().regex(/^\d+$/))),
+  CHAT_GROUP_IDS: groupIds,
+  CHAT_FEEDBACK_GROUP_IDS: groupIds,
   CHAT_MAX_INPUT_CHARS: z.coerce
     .number()
     .int()
@@ -56,7 +59,9 @@ export interface BotConfig {
   provider: ProviderConfig;
   chat: ChatOptions;
   groupIds: readonly string[];
+  feedbackGroupIds: readonly string[];
   groupSystemPrompt: string;
+  memoryDir: string;
 }
 
 export function loadConfig(
@@ -97,7 +102,9 @@ export function loadConfig(
     },
     provider,
     groupIds: env.CHAT_GROUP_IDS,
+    feedbackGroupIds: env.CHAT_FEEDBACK_GROUP_IDS,
     groupSystemPrompt: env.CHAT_GROUP_SYSTEM_PROMPT || env.CHAT_SYSTEM_PROMPT,
+    memoryDir: env.CHAT_MEMORY_DIR,
     chat: {
       systemPrompt: env.CHAT_SYSTEM_PROMPT,
       historyTurns: env.CHAT_HISTORY_TURNS,

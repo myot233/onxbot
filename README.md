@@ -75,7 +75,17 @@ OPENAI_API_KEY=你的密钥
 OPENAI_MODEL=你的模型名称
 ```
 
-支持 OpenAI 兼容的 `/chat/completions` 接口，采用非流式回复；模型包支持文本与 function tool calls。当前应用默认不注册工具，增加工具时在应用装配处注入 `TurnRunner`，示例见设计文档。`OPENAI_BASE_URL` 应包含 API 前缀，例如 `/v1`。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
+模型请求和工具循环由 Vercel AI SDK 执行，支持 OpenAI 兼容的 `/chat/completions`。`OPENAI_BASE_URL` 应设置为服务商的 API 基地址。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
+
+### Markdown 记忆
+
+使用真实模型时，Agent 可以在同一回合调用 `send_message`、`list_memory`、`read_memory` 和 `write_memory`。自然群聊只在 Agent 调用 `send_message` 时发送，指令 `/chat` 会在数据库提交后回复。默认目录为 `memory/group/<群号>/` 和 `memory/user/<用户号>/`，可以用 `CHAT_MEMORY_DIR` 更换根目录。配置了自然参与的群使用该群目录，私聊 `/chat` 使用该用户目录。
+
+模型可以创建和更新多份按主题命名的 `.md` 文件。`write_memory` 排队后立即返回，后台串行写盘并原子替换文件。队列中的内容可以立即读到，正常退出时会等队列写完。容器部署时应把 `CHAT_MEMORY_DIR` 指到可写的持久卷。`/reset` 清理指令对话历史，Markdown 记忆单独管理。
+
+### 群聊反馈
+
+通过 `CHAT_FEEDBACK_GROUP_IDS` 为指定群开启接话采样和引用反馈。启用方式、周报查询和回归流程见[群聊反馈与评测](docs/group-feedback.md)。
 
 ### 构建与运行
 
@@ -104,11 +114,11 @@ TEST_DATABASE_URL=postgresql://onxbot:onxbot_dev@127.0.0.1:5432/onxbot pnpm test
 
 ## 存储行为
 
-每次成功对话原子写入用户消息和本轮全部 assistant / tool 消息，包括工具调用与对应结果。调用模型或工具失败时回滚，不留下半个回合。同一会话通过 PostgreSQL 行锁串行处理，多进程也共享这一约束；不同会话可并发。数据库回滚不会撤销外部工具已经产生的效果，执行器不自动重试工具。
+每次成功的指令对话按完整回合原子写入 AI SDK 消息。同一会话通过 PostgreSQL 行锁串行处理，不同会话可并发。记忆 Agent 的文件读取内容和工具参数只在本轮使用，指令历史只保存用户正文和实际回复。
 
-当前实现会在整个回合期间持有事务及连接，连接池上限为 10。这适合初始规模，吞吐量增加后可替换 `ConversationStore` 实现。`CHAT_HISTORY_TURNS` 限制完整历史回合数；一个回合可以包含多条工具消息。`ContextBuilder` 提供可选 token 预算接口，默认应用尚未配置计数器。摘要与长期记忆可通过上下文来源接入，当前尚未内置生成与检索。历史记录持续保存在数据库，直到 `/reset` 删除。`CHAT_MAX_INPUT_CHARS` 限制单条输入长度，`CHAT_TIMEOUT_MS` 限制每次模型请求时间；`TurnRunner` 默认最多请求模型 8 次。
+当前实现会在整个指令回合期间持有事务及连接，连接池上限为 10。`CHAT_HISTORY_TURNS` 限制完整历史回合数。`ContextBuilder` 提供可选 token 预算接口。历史记录持续保存在数据库，直到 `/reset` 删除。`CHAT_MAX_INPUT_CHARS` 限制单条输入长度，`CHAT_TIMEOUT_MS` 限制每步模型请求时间，`TurnRunner` 默认最多请求模型 8 次。
 
-升级已有数据库时执行 `pnpm db:migrate`；增量迁移保留原有对话并增加工具消息字段。
+升级已有数据库时执行 `pnpm db:migrate`。迁移 `003-sdk-turns` 会删除旧的指令对话历史，新回合写入 `conversation_turns`。
 
 ## Koishi 的使用边界
 

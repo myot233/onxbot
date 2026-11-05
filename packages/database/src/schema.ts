@@ -1,9 +1,28 @@
-import type { ToolCall } from '@onxbot/model';
+import type { ConversationMessage } from '@onxbot/model';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 
 type Timestamp = ColumnType<Date, Date | string | undefined, Date | string>;
 
 export interface Database {
+  group_decisions: {
+    id: Generated<string>;
+    group_id: string;
+    message_id: string;
+    reply_id: string | null;
+    policy: string;
+    trigger: GroupDecision['trigger'];
+    outcome: GroupDecision['outcome'];
+    context: JSONColumnType<
+      { speaker: number; text: string; quote?: string }[]
+    >;
+    reply: string | null;
+    created_at: Timestamp;
+  };
+  group_ratings: {
+    decision_id: string;
+    voter_id: string;
+    label: FeedbackLabel;
+  };
   conversations: {
     id: Generated<string>;
     platform: string;
@@ -13,13 +32,12 @@ export interface Database {
     created_at: Timestamp;
     updated_at: Timestamp;
   };
-  messages: {
+  conversation_turns: {
     id: Generated<string>;
     conversation_id: string;
-    role: 'user' | 'assistant' | 'tool';
-    content: string;
-    tool_calls: JSONColumnType<readonly ToolCall[] | null, string | null>;
-    tool_call_id: string | null;
+    messages: JSONColumnType<ConversationMessage[]>;
     created_at: Timestamp;
   };
 }
+
+import type { FeedbackLabel, GroupDecision } from '@onxbot/core';

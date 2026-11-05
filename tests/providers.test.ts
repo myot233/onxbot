@@ -14,7 +14,7 @@ describe('chat providers', () => {
           { role: 'user', content: '你好 <at id="123"/>' },
         ],
       }),
-    ).toEqual({ type: 'reply', text: '收到：你好 <at id="123"/>' });
+    ).toMatchObject({ text: '收到：你好 <at id="123"/>' });
   });
 
   it('sends ordered context and authorization to an OpenAI-compatible endpoint', async () => {
@@ -49,12 +49,11 @@ describe('chat providers', () => {
         { role: 'assistant' as const, content: '上一轮回复' },
         { role: 'user' as const, content: '你好' },
       ];
-      expect(await provider.generate({ messages })).toEqual({
-        type: 'reply',
+      expect(await provider.generate({ messages })).toMatchObject({
         text: '你好！',
       });
       expect(authorization).toBe('Bearer test-key');
-      expect(payload).toEqual({ model: 'test-model', messages, stream: false });
+      expect(payload).toMatchObject({ model: 'test-model', messages });
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
