@@ -53,12 +53,14 @@ export function createSdkModelProvider(
               text,
               toolCalls,
               toolResults,
+              providerMetadata,
             }) => {
               options.trace?.({
                 phase: 'output',
                 data: {
                   finishReason,
                   usage,
+                  cache: providerMetadata?.deepseek,
                   text,
                   toolCalls: toolCalls.map(
                     ({ toolName, toolCallId, input }) => ({
@@ -143,6 +145,29 @@ export function createModelProvider(
     name: 'onxbot',
     apiKey: config.apiKey,
     baseURL: config.baseUrl.replace(/\/+$/, ''),
+    metadataExtractor: {
+      async extractMetadata({ parsedBody }) {
+        if (
+          !parsedBody ||
+          typeof parsedBody !== 'object' ||
+          !('usage' in parsedBody)
+        )
+          return;
+        const usage = parsedBody.usage;
+        if (!usage || typeof usage !== 'object') return;
+        const hit =
+          'prompt_cache_hit_tokens' in usage && usage.prompt_cache_hit_tokens;
+        const miss =
+          'prompt_cache_miss_tokens' in usage && usage.prompt_cache_miss_tokens;
+        if (typeof hit === 'number' && typeof miss === 'number')
+          return { deepseek: { hitTokens: hit, missTokens: miss } };
+      },
+      // The bot uses generateText, so no streaming metadata is collected.
+      createStreamExtractor: () => ({
+        processChunk() {},
+        buildMetadata: () => undefined,
+      }),
+    },
   });
   return createSdkModelProvider(provider(config.model), {
     timeoutMs: config.timeoutMs,

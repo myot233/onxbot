@@ -236,6 +236,9 @@ describe('headless Koishi with OneBot v11', () => {
       expect(
         groupCalls.map(({ messages }) => messages.at(-1)?.content),
       ).toEqual(['只是闲聊', '你怎么看？']);
+      expect(
+        groupCalls[1]?.messages.slice(0, groupCalls[0]?.messages.length),
+      ).toEqual(groupCalls[0]?.messages);
       const mentionedContext = JSON.stringify(groupCalls[1]?.messages);
       expect(mentionedContext).toContain('在讨论浮点数');
       expect(mentionedContext).toContain('Bob');
