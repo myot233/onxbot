@@ -1,7 +1,8 @@
-import type {
-  ConversationMessage,
-  ModelMessage,
-  TurnMessage,
+import {
+  type ConversationMessage,
+  type ModelMessage,
+  type TurnMessage,
+  userMessageRoleSchema,
 } from '@onxbot/model';
 import { takeRight } from 'lodash-es';
 import type { ConversationIdentity } from '../conversation/types.js';
@@ -73,7 +74,7 @@ export class ContextBuilder {
     }
     const turns: ConversationMessage[][] = [];
     for (const message of request.history) {
-      if (message.role === 'user') turns.push([]);
+      if (userMessageRoleSchema.safeParse(message).success) turns.push([]);
       turns.at(-1)?.push(message);
     }
     const recent = takeRight(turns, this.historyTurns);

@@ -1,3 +1,4 @@
+import { systemMessageSchema } from '@onxbot/model';
 import { z } from 'zod';
 import type { PreparedContext } from '../context/builder.js';
 import type { MarkdownMemory, MemoryScope } from '../memory.js';
@@ -59,10 +60,13 @@ export class ConversationAgent {
       {
         messages(output) {
           const messages = context.messages(output);
-          const first = messages[0];
-          if (first?.role === 'system')
+          const first = systemMessageSchema.safeParse(messages[0]);
+          if (first.success)
             return [
-              { role: 'system', content: `${first.content}\n${instructions}` },
+              {
+                role: 'system',
+                content: `${first.data.content}\n${instructions}`,
+              },
               ...messages.slice(1),
             ];
           return [{ role: 'system', content: instructions }, ...messages];

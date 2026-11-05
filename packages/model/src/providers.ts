@@ -5,7 +5,22 @@ import {
   isStepCount,
   type LanguageModel,
 } from 'ai';
+import { z } from 'zod';
+import { userMessageRoleSchema } from './message-schemas.js';
 import type { ModelProvider, ModelTrace } from './types.js';
+
+const toolErrorPartSchema = z.object({ type: z.literal('tool-error') });
+const echoContentSchema = z.string().catch('');
+const deepSeekUsageResponseSchema = z.object({
+  usage: z.object({
+    prompt_cache_hit_tokens: z.number(),
+    prompt_cache_miss_tokens: z.number(),
+  }),
+});
+
+function isToolErrorPart(part: unknown): boolean {
+  return toolErrorPartSchema.safeParse(part).success;
+}
 
 export type ProviderConfig =
   | { type: 'echo' }
@@ -90,9 +105,7 @@ export function createSdkModelProvider(
               providerOptions: { onxbot: { thinking: { type: 'disabled' } } },
             }),
           prepareStep: ({ stepNumber, responseMessages, steps }) => {
-            if (
-              steps.at(-1)?.content.some((part) => part.type === 'tool-error')
-            )
+            if (steps.at(-1)?.content.some(isToolErrorPart))
               throw new Error('Model tool execution failed.');
             return {
               ...(prepareMessages &&
@@ -112,7 +125,7 @@ export function createSdkModelProvider(
           result.steps.length >= maxSteps
         )
           throw new Error('Model call limit reached.');
-        if (result.content.some((part) => part.type === 'tool-error'))
+        if (result.content.some(isToolErrorPart))
           throw new Error('Model tool execution failed.');
         return { text: result.text.trim(), messages: result.responseMessages };
       } catch (error) {
@@ -135,9 +148,10 @@ export function createModelProvider(
   if (config.type === 'echo')
     return {
       async generate({ messages }) {
-        const latest = messages.findLast((message) => message.role === 'user');
-        const content = latest?.content;
-        const text = `收到：${typeof content === 'string' ? content : ''}`;
+        const latest = messages.findLast(
+          (message) => userMessageRoleSchema.safeParse(message).success,
+        );
+        const text = `收到：${echoContentSchema.parse(latest?.content)}`;
         return { text, messages: [{ role: 'assistant', content: text }] };
       },
     };
@@ -147,20 +161,13 @@ export function createModelProvider(
     baseURL: config.baseUrl.replace(/\/+$/, ''),
     metadataExtractor: {
       async extractMetadata({ parsedBody }) {
-        if (
-          !parsedBody ||
-          typeof parsedBody !== 'object' ||
-          !('usage' in parsedBody)
-        )
-          return;
-        const usage = parsedBody.usage;
-        if (!usage || typeof usage !== 'object') return;
-        const hit =
-          'prompt_cache_hit_tokens' in usage && usage.prompt_cache_hit_tokens;
-        const miss =
-          'prompt_cache_miss_tokens' in usage && usage.prompt_cache_miss_tokens;
-        if (typeof hit === 'number' && typeof miss === 'number')
-          return { deepseek: { hitTokens: hit, missTokens: miss } };
+        const parsed = deepSeekUsageResponseSchema.safeParse(parsedBody);
+        if (!parsed.success) return;
+        const {
+          prompt_cache_hit_tokens: hitTokens,
+          prompt_cache_miss_tokens: missTokens,
+        } = parsed.data.usage;
+        return { deepseek: { hitTokens, missTokens } };
       },
       // The bot uses generateText, so no streaming metadata is collected.
       createStreamExtractor: () => ({

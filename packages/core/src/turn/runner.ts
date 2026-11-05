@@ -1,4 +1,8 @@
-import type { ModelProvider, TurnMessage } from '@onxbot/model';
+import {
+  type ModelProvider,
+  replaceableAssistantMessageSchema,
+  type TurnMessage,
+} from '@onxbot/model';
 import type { PreparedContext } from '../context/builder.js';
 import type { Tool } from './tools.js';
 
@@ -52,12 +56,7 @@ export class TurnRunner {
       throw new Error('Model returned an empty reply.');
     }
     const messages = [...result.messages];
-    const last = messages.at(-1);
-    if (
-      last?.role === 'assistant' &&
-      (typeof last.content === 'string' ||
-        !last.content.some((part) => part.type === 'tool-call'))
-    )
+    if (replaceableAssistantMessageSchema.safeParse(messages.at(-1)).success)
       messages.pop();
     messages.push({ role: 'assistant', content: reply });
     return { reply, messages };
