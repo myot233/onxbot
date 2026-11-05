@@ -3,7 +3,9 @@ import type { ConversationAgent } from './turn/agent.js';
 
 const historyLimit = 16;
 const decisionIntervalMs = 45_000;
+const topicContextMaxAgeMs = 60 * 60_000;
 const silence = '[[SKIP]]';
+type GroupSend = (text: string, index: number) => Promise<boolean>;
 
 interface GroupLine {
   speaker: string;
@@ -17,6 +19,8 @@ interface GroupRoom {
   nextDecisionAt: number;
   pending: Promise<void> | undefined;
   queued: number;
+  lastActivityAt: number;
+  activitySinceTopic: boolean;
 }
 
 export interface GroupMessage extends GroupLine {
@@ -25,7 +29,7 @@ export interface GroupMessage extends GroupLine {
 }
 
 export interface GroupDecision {
-  trigger: 'direct' | 'ambient';
+  trigger: 'direct' | 'ambient' | 'topic';
   outcome: 'sent' | 'silent' | 'stale' | 'error';
   context: readonly GroupLine[];
   reply?: string;
@@ -45,7 +49,7 @@ export class GroupChat {
 
   async receive(
     message: GroupMessage,
-    send: (text: string, index: number) => Promise<boolean>,
+    send: GroupSend,
     observe?: (decision: GroupDecision) => void,
   ): Promise<void> {
     const room = this.rooms.get(message.roomId) ?? {
@@ -53,6 +57,8 @@ export class GroupChat {
       nextDecisionAt: 0,
       pending: undefined,
       queued: 0,
+      lastActivityAt: 0,
+      activitySinceTopic: false,
     };
     this.rooms.set(message.roomId, room);
     const line = {
@@ -62,6 +68,8 @@ export class GroupChat {
       ...(message.quote && { quote: message.quote.slice(0, 400) }),
     };
     this.remember(room, line);
+    room.lastActivityAt = Date.now();
+    room.activitySinceTopic = true;
 
     const direct = message.addressedTo === 'bot';
     if (room.queued >= 3) return;
@@ -75,9 +83,48 @@ export class GroupChat {
     )
       return;
 
+    await this.enqueue(
+      message.roomId,
+      room,
+      line,
+      direct ? 'direct' : 'ambient',
+      send,
+      observe,
+    );
+  }
+
+  async initiateTopic(roomId: string, send: GroupSend): Promise<void> {
+    const room = this.rooms.get(roomId);
+    const last = room?.lines.at(-1);
+    const now = Date.now();
+    if (
+      !this.options.agent ||
+      !room ||
+      !last ||
+      room.lines.length < 2 ||
+      room.pending ||
+      now < room.nextDecisionAt ||
+      !room.activitySinceTopic ||
+      now - room.lastActivityAt > topicContextMaxAgeMs
+    )
+      return;
+
+    room.activitySinceTopic = false;
+    await this.enqueue(roomId, room, last, 'topic', send);
+  }
+
+  private async enqueue(
+    roomId: string,
+    room: GroupRoom,
+    line: GroupLine,
+    trigger: GroupDecision['trigger'],
+    send: GroupSend,
+    observe?: (decision: GroupDecision) => void,
+  ): Promise<void> {
+    const direct = trigger === 'direct';
     room.nextDecisionAt = Date.now() + decisionIntervalMs;
     const decision: GroupDecision = {
-      trigger: direct ? 'direct' : 'ambient',
+      trigger,
       outcome: 'silent',
       context: [...room.lines],
     };
@@ -94,6 +141,7 @@ export class GroupChat {
               '每条群消息由一条 JSON 元数据和紧随其后的正文组成。只判断最后一条群消息，前面的消息仅作为上文。',
               '最后一条 addressedTo 为 bot 时，对方在叫你，直接回应，回复内容只写正文。',
               `最后一条 addressedTo 为 group 时，只有确实能补充有用信息或自然延续话题时才接话。寒暄、闲聊或别人已经回答时，不发消息，最终输出 ${silence}。`,
+              '如果最后一个输入是未配对的定时唤醒标记 scheduled_topic，可以从上文找一个自然的新话题，或重提值得继续聊的线索。面向全群发言。没有合适话题就保持沉默。',
             ].join('\n'),
           },
           ...decision.context.flatMap(
@@ -103,6 +151,11 @@ export class GroupChat {
             ],
           ),
         ];
+        if (trigger === 'topic')
+          messages.push({
+            role: 'user',
+            content: '{"trigger":"scheduled_topic"}',
+          });
         const deliver = async (
           replies: readonly string[],
         ): Promise<readonly string[]> => {
@@ -134,7 +187,7 @@ export class GroupChat {
         if (this.options.agent) {
           await this.options.agent.run(
             { messages: (output = []) => [...messages, ...output] },
-            { kind: 'group', id: message.roomId },
+            { kind: 'group', id: roomId },
             deliver,
           );
         } else {

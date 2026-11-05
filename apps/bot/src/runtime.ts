@@ -34,7 +34,12 @@ export function createBotRuntime(
     }),
     ...(groupChat &&
       config.groupIds.length && {
-        group: { ids: config.groupIds, chat: groupChat },
+        group: {
+          ids: config.groupIds,
+          chat: groupChat,
+          topicIds:
+            config.provider.type === 'openai' ? config.topicGroupIds : [],
+        },
       }),
   });
   return {
