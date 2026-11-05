@@ -66,6 +66,8 @@ pnpm dev
 
 在 `CHAT_GROUP_IDS` 中填写允许自然参与的 QQ 群号，用逗号分隔。机器人会回应 @ 和引用自己的消息，回复时会 @ 触发回复的群友。使用真实模型时，它也会按群聊上下文判断是否接普通消息，主动接话有 45 秒冷却。群聊在内存里按顺序追加消息，超过 16 条时批量丢弃最早 8 条，以便多次触发能复用相同的输入前缀，和指令会话分开。`CHAT_GROUP_SYSTEM_PROMPT` 可单独设置群聊人格，留空时沿用 `CHAT_SYSTEM_PROMPT`。
 
+可将[理工系文学少女人设示例](examples/personas/literary-engineer.txt)的全文复制到 `.env`，用一对单引号包住多行的 `CHAT_GROUP_SYSTEM_PROMPT` 值。示例包含说话习惯、两段短消息对话和定时话题的开场方式。
+
 默认 `CHAT_PROVIDER=echo`，回复 `收到：…`，用于验证整个接入链路。启用真实模型时修改 `.env`：
 
 ```dotenv
