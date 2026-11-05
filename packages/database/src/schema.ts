@@ -1,9 +1,19 @@
+import type { FeedbackLabel, GroupDecision, GroupLine } from '@onxbot/core';
 import type { ConversationMessage } from '@onxbot/model';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 
 type Timestamp = ColumnType<Date, Date | string | undefined, Date | string>;
 
 export interface Database {
+  group_topic_schedules: {
+    bot_id: string;
+    group_id: string;
+    next_run_at: Timestamp;
+    last_activity_at: Timestamp | null;
+    activity_version: Generated<string>;
+    consumed_version: Generated<string>;
+    context: ColumnType<GroupLine[], string | undefined, string>;
+  };
   group_decisions: {
     id: Generated<string>;
     group_id: string;
@@ -39,5 +49,3 @@ export interface Database {
     created_at: Timestamp;
   };
 }
-
-import type { FeedbackLabel, GroupDecision } from '@onxbot/core';

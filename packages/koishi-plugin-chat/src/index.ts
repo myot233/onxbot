@@ -1,4 +1,3 @@
-import { randomInt } from 'node:crypto';
 import { createRequire } from 'node:module';
 import {
   ChatInputError,
@@ -8,7 +7,11 @@ import {
   feedbackLabels,
   type GroupChat,
   type GroupFeedback,
+  type GroupLine,
+  type GroupMessage,
+  type GroupTopicStore,
   type MemoryScope,
+  prepareGroupLine,
 } from '@onxbot/core';
 import type { Context, Session } from 'koishi';
 
@@ -24,7 +27,7 @@ export interface Config {
   group?: {
     ids: readonly string[];
     chat: GroupChat;
-    topicIds?: readonly string[];
+    topics?: { ids: readonly string[]; store: GroupTopicStore };
   };
   feedback?: { ids: readonly string[]; store: GroupFeedback };
 }
@@ -52,15 +55,86 @@ export function apply(context: Context, config: Config): void {
   const enabledGroups = new Set(config.group?.ids);
   const feedbackGroups = new Set(config.feedback?.ids);
   if (config.group) {
-    const { chat } = config.group;
-    const topicGroups = new Set(config.group.topicIds);
-    const topicTimers = new Map<string, NodeJS.Timeout>();
-    let stopped = false;
-    context.on('dispose', () => {
-      stopped = true;
-      for (const timer of topicTimers.values()) clearTimeout(timer);
-      topicTimers.clear();
-    });
+    const { chat, topics } = config.group;
+    const topicIds = topics?.ids.filter((id) => enabledGroups.has(id)) ?? [];
+    const topicGroups = new Set(topicIds);
+    const recordTopicLine = async (
+      botId: string,
+      groupId: string,
+      line: GroupLine,
+      human: boolean,
+    ) => {
+      try {
+        await topics?.store.append(botId, groupId, line, human);
+      } catch {
+        logger.warn('Could not persist scheduled topic context.');
+      }
+    };
+    if (topics && topicIds.length) {
+      let stopped = false;
+      let polling = false;
+      const poll = async () => {
+        if (stopped || polling) return;
+        const bot = context.bots.find(
+          (entry) => entry.platform === 'onebot' && entry.isActive,
+        );
+        if (!bot) return;
+        polling = true;
+        try {
+          const due = await topics.store.claimDue(
+            bot.selfId,
+            topicIds.filter((id) => chat.canInitiateTopic(id)),
+          );
+          const results = await Promise.allSettled(
+            due.map(async (topic) => {
+              if (stopped || !bot.isActive) return;
+              const run = () =>
+                chat.initiateTopic(
+                  topic.groupId,
+                  topic.context,
+                  async (reply) => {
+                    if (
+                      !(await topics.store.isCurrent(bot.selfId, topic)) ||
+                      stopped ||
+                      !bot.isActive
+                    )
+                      return false;
+                    if (
+                      !(await bot.sendMessage(topic.groupId, h.text(reply)))
+                        ?.length
+                    )
+                      return false;
+                    await recordTopicLine(
+                      bot.selfId,
+                      topic.groupId,
+                      { speaker: '你（onxbot）', text: reply },
+                      false,
+                    );
+                    return true;
+                  },
+                );
+              if (config.observe)
+                await config.observe(
+                  `${bot.platform}/${bot.selfId}/group/${topic.groupId}`,
+                  run,
+                );
+              else await run();
+            }),
+          );
+          if (results.some((result) => result.status === 'rejected'))
+            logger.warn('Scheduled group topic failed.');
+        } catch {
+          logger.warn('Could not claim scheduled group topics.');
+        } finally {
+          polling = false;
+        }
+      };
+      const timer = setInterval(() => void poll(), 5_000).unref();
+      context.on('dispose', () => {
+        stopped = true;
+        clearInterval(timer);
+      });
+    }
     context.on('message', async (session) => {
       const { userId, guildId } = session;
       if (
@@ -103,62 +177,32 @@ export function apply(context: Context, config: Config): void {
         return;
       }
       if (text.startsWith('/') || (!text && !direct)) return;
-      const { bot, channelId, platform } = session;
-      if (channelId && topicGroups.has(guildId) && !topicTimers.has(guildId)) {
-        const schedule = () => {
-          if (stopped) return;
-          topicTimers.set(
-            guildId,
-            setTimeout(
-              async () => {
-                try {
-                  if (stopped || !bot.isActive) return;
-                  const run = () =>
-                    chat.initiateTopic(
-                      guildId,
-                      async (reply) =>
-                        !stopped &&
-                        bot.isActive &&
-                        Boolean(
-                          (await bot.sendMessage(channelId, h.text(reply)))
-                            ?.length,
-                        ),
-                    );
-                  if (config.observe)
-                    await config.observe(
-                      `${platform}/${bot.selfId}/group/${guildId}`,
-                      run,
-                    );
-                  else await run();
-                } catch {
-                  logger.warn('Scheduled group topic failed.');
-                } finally {
-                  schedule();
-                }
-              },
-              randomInt(15 * 60_000, 20 * 60_000 + 1),
-            ).unref(),
-          );
-        };
-        schedule();
-      }
       const quote = plainText(session.quote?.elements ?? []);
       const messageId = session.messageId;
+      const groupMessage: GroupMessage = {
+        roomId: guildId,
+        speaker: session.username || userId,
+        text: text || '（叫了你）',
+        addressedTo: direct
+          ? 'bot'
+          : mentions.length || session.quote
+            ? 'someone-else'
+            : 'group',
+        ...(quote && { quote }),
+      };
+      const trackTopic = topicGroups.has(guildId);
+      if (trackTopic)
+        await recordTopicLine(
+          session.selfId,
+          guildId,
+          prepareGroupLine(groupMessage),
+          true,
+        );
       let replyId: string | undefined;
       try {
         const run = () =>
           chat.receive(
-            {
-              roomId: guildId,
-              speaker: session.username || userId,
-              text: text || '（叫了你）',
-              addressedTo: direct
-                ? 'bot'
-                : mentions.length || session.quote
-                  ? 'someone-else'
-                  : 'group',
-              ...(quote && { quote }),
-            },
+            groupMessage,
             async (reply, index) => {
               const [id] =
                 (await session.send(
@@ -167,6 +211,13 @@ export function apply(context: Context, config: Config): void {
                     : [h.text(reply)],
                 )) ?? [];
               replyId ??= id;
+              if (id && trackTopic)
+                await recordTopicLine(
+                  session.selfId,
+                  guildId,
+                  { speaker: '你（onxbot）', text: reply },
+                  false,
+                );
               return Boolean(id);
             },
             feedback && messageId

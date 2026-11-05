@@ -3,11 +3,10 @@ import type { ConversationAgent } from './turn/agent.js';
 
 const historyLimit = 16;
 const decisionIntervalMs = 45_000;
-const topicContextMaxAgeMs = 60 * 60_000;
 const silence = '[[SKIP]]';
 type GroupSend = (text: string, index: number) => Promise<boolean>;
 
-interface GroupLine {
+export interface GroupLine {
   speaker: string;
   text: string;
   quote?: string;
@@ -19,13 +18,26 @@ interface GroupRoom {
   nextDecisionAt: number;
   pending: Promise<void> | undefined;
   queued: number;
-  lastActivityAt: number;
-  activitySinceTopic: boolean;
 }
 
 export interface GroupMessage extends GroupLine {
   roomId: string;
   addressedTo: 'bot' | 'someone-else' | 'group';
+}
+
+export function prepareGroupLine(message: GroupMessage): GroupLine {
+  return {
+    speaker: message.speaker.slice(0, 60),
+    text: message.text.slice(0, 400),
+    addressedTo: message.addressedTo,
+    ...(message.quote && { quote: message.quote.slice(0, 400) }),
+  };
+}
+
+export function appendGroupLine(lines: GroupLine[], line: GroupLine): void {
+  lines.push(line);
+  // Rotate in batches so requests can share a prefix between rotations.
+  if (lines.length > historyLimit) lines.splice(0, historyLimit / 2);
 }
 
 export interface GroupDecision {
@@ -52,24 +64,9 @@ export class GroupChat {
     send: GroupSend,
     observe?: (decision: GroupDecision) => void,
   ): Promise<void> {
-    const room = this.rooms.get(message.roomId) ?? {
-      lines: [],
-      nextDecisionAt: 0,
-      pending: undefined,
-      queued: 0,
-      lastActivityAt: 0,
-      activitySinceTopic: false,
-    };
-    this.rooms.set(message.roomId, room);
-    const line = {
-      speaker: message.speaker.slice(0, 60),
-      text: message.text.slice(0, 400),
-      addressedTo: message.addressedTo,
-      ...(message.quote && { quote: message.quote.slice(0, 400) }),
-    };
-    this.remember(room, line);
-    room.lastActivityAt = Date.now();
-    room.activitySinceTopic = true;
+    const room = this.getRoom(message.roomId);
+    const line = prepareGroupLine(message);
+    appendGroupLine(room.lines, line);
 
     const direct = message.addressedTo === 'bot';
     if (room.queued >= 3) return;
@@ -93,40 +90,60 @@ export class GroupChat {
     );
   }
 
-  async initiateTopic(roomId: string, send: GroupSend): Promise<void> {
-    const room = this.rooms.get(roomId);
-    const last = room?.lines.at(-1);
-    const now = Date.now();
-    if (
-      !this.options.agent ||
-      !room ||
-      !last ||
-      room.lines.length < 2 ||
-      room.pending ||
-      now < room.nextDecisionAt ||
-      !room.activitySinceTopic ||
-      now - room.lastActivityAt > topicContextMaxAgeMs
-    )
-      return;
+  private getRoom(roomId: string): GroupRoom {
+    const room = this.rooms.get(roomId) ?? {
+      lines: [],
+      nextDecisionAt: 0,
+      pending: undefined,
+      queued: 0,
+    };
+    this.rooms.set(roomId, room);
+    return room;
+  }
 
-    room.activitySinceTopic = false;
-    await this.enqueue(roomId, room, last, 'topic', send);
+  canInitiateTopic(roomId: string): boolean {
+    const room = this.rooms.get(roomId);
+    return (
+      Boolean(this.options.agent) &&
+      !room?.pending &&
+      Date.now() >= (room?.nextDecisionAt ?? 0)
+    );
+  }
+
+  async initiateTopic(
+    roomId: string,
+    context: readonly GroupLine[],
+    send: GroupSend,
+  ): Promise<void> {
+    if (context.length < 2 || !this.canInitiateTopic(roomId)) return;
+    const room = this.getRoom(roomId);
+
+    await this.enqueue(
+      roomId,
+      room,
+      room.lines.at(-1),
+      'topic',
+      send,
+      undefined,
+      context,
+    );
   }
 
   private async enqueue(
     roomId: string,
     room: GroupRoom,
-    line: GroupLine,
+    line: GroupLine | undefined,
     trigger: GroupDecision['trigger'],
     send: GroupSend,
     observe?: (decision: GroupDecision) => void,
+    context: readonly GroupLine[] = room.lines,
   ): Promise<void> {
     const direct = trigger === 'direct';
     room.nextDecisionAt = Date.now() + decisionIntervalMs;
     const decision: GroupDecision = {
       trigger,
       outcome: 'silent',
-      context: [...room.lines],
+      context: [...context],
     };
     const pending = (room.pending ?? Promise.resolve())
       .catch(() => {})
@@ -160,7 +177,7 @@ export class GroupChat {
           replies: readonly string[],
         ): Promise<readonly string[]> => {
           const sent: string[] = [];
-          let expected: GroupLine = line;
+          let expected = line;
           for (const reply of replies) {
             const text = reply.trim().slice(0, 300);
             if (!text || text === silence) continue;
@@ -178,7 +195,7 @@ export class GroupChat {
             room.nextDecisionAt = Date.now() + decisionIntervalMs;
             const latest = room.lines.at(-1);
             const delivered = { speaker: '你（onxbot）', text };
-            this.remember(room, delivered);
+            appendGroupLine(room.lines, delivered);
             if (!direct && latest !== expected) break;
             expected = delivered;
           }
@@ -206,12 +223,5 @@ export class GroupChat {
       if (room.pending === pending) room.pending = undefined;
       observe?.(decision);
     }
-  }
-
-  private remember(room: GroupRoom, line: GroupLine): void {
-    room.lines.push(line);
-    // Rotate in batches so requests can share a prefix between rotations.
-    if (room.lines.length > historyLimit)
-      room.lines.splice(0, historyLimit / 2);
   }
 }

@@ -1,6 +1,11 @@
 import { createRequire } from 'node:module';
 import { HTTP } from '@koishijs/plugin-http';
-import type { ChatService, GroupChat, GroupFeedback } from '@onxbot/core';
+import type {
+  ChatService,
+  GroupChat,
+  GroupFeedback,
+  GroupTopicStore,
+} from '@onxbot/core';
 import * as chatPlugin from '@onxbot/koishi-plugin-chat';
 import type { Context as KoishiContext } from 'koishi';
 import { OneBotBot } from 'koishi-plugin-adapter-onebot';
@@ -17,6 +22,7 @@ export function createBotRuntime(
   groupChat?: GroupChat,
   feedback?: GroupFeedback,
   observe?: chatPlugin.Config['observe'],
+  topics?: GroupTopicStore,
 ): { context: KoishiContext; stop(): Promise<void> } {
   const context = new Context({ prefix: ['/'], prefixMode: 'strict' });
   context.plugin(HTTP);
@@ -37,8 +43,9 @@ export function createBotRuntime(
         group: {
           ids: config.groupIds,
           chat: groupChat,
-          topicIds:
-            config.provider.type === 'openai' ? config.topicGroupIds : [],
+          ...(topics && {
+            topics: { ids: config.topicGroupIds, store: topics },
+          }),
         },
       }),
   });
