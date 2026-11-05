@@ -4,6 +4,7 @@ import * as conversations from './migrations/001-conversations.js';
 import * as toolMessages from './migrations/002-tool-messages.js';
 import * as sdkTurns from './migrations/003-sdk-turns.js';
 import * as groupFeedback from './migrations/004-group-feedback.js';
+import * as groupTopicSchedules from './migrations/005-group-topic-schedules.js';
 import type { Database } from './schema.js';
 
 export async function migrate(db: Kysely<Database>): Promise<void> {
@@ -25,6 +26,7 @@ export async function migrate(db: Kysely<Database>): Promise<void> {
           '002-tool-messages': toolMessages,
           '003-sdk-turns': sdkTurns,
           '004-group-feedback': groupFeedback,
+          '005-group-topic-schedules': groupTopicSchedules,
         };
       },
     },

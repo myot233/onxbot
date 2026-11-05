@@ -210,11 +210,10 @@ it('sends each short group reply separately and in order', async () => {
   }
 });
 
-it('starts a scheduled topic from recent group context once per new activity', async () => {
+it('starts a scheduled topic from restored context without receiving live messages', async () => {
   const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
   const memory = new MarkdownMemory(root, vi.fn());
   const send = vi.fn(async () => true);
-  const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
   let step = 0;
   const model = sdkModel(({ prompt }) => {
     if (step++ === 0) {
@@ -231,29 +230,19 @@ it('starts a scheduled topic from recent group context once per new activity', a
     spontaneous: false,
     agent: new ConversationAgent(new TurnRunner(model), memory),
   });
-  const message = { roomId: '42', addressedTo: 'group' as const, speaker: 'A' };
+  const saved = [
+    { speaker: 'A', text: '周二有空' },
+    { speaker: 'B', text: '想找家咖啡馆' },
+  ];
   try {
-    await group.receive({ ...message, text: '周二有空' }, send);
-    await group.initiateTopic('42', send);
+    await group.initiateTopic('42', saved.slice(0, 1), send);
     expect(step).toBe(0);
-
-    await group.receive({ ...message, text: '想找家咖啡馆' }, send);
-    await group.initiateTopic('42', send);
+    await group.initiateTopic('42', saved, send);
     expect(send).toHaveBeenCalledExactlyOnceWith(
       '说到周二，有人想一起喝咖啡吗？',
       0,
     );
-
-    clock.mockReturnValue(2_000_000);
-    await group.initiateTopic('42', send);
-    expect(step).toBe(2);
-
-    await group.receive({ ...message, text: '再想想' }, send);
-    clock.mockReturnValue(6_000_000);
-    await group.initiateTopic('42', send);
-    expect(step).toBe(2);
   } finally {
-    clock.mockRestore();
     await memory.close();
     await rm(root, { recursive: true, force: true });
   }

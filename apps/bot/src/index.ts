@@ -13,6 +13,7 @@ import {
   createConversationStore,
   createDatabase,
   createGroupFeedback,
+  createGroupTopicStore,
 } from '@onxbot/database';
 import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
@@ -61,6 +62,11 @@ async function main(): Promise<void> {
           config.onebot.token,
         )
       : undefined;
+  const topics =
+    config.provider.type === 'openai' &&
+    config.topicGroupIds.some((id) => config.groupIds.includes(id))
+      ? createGroupTopicStore(db)
+      : undefined;
   const runtime = createBotRuntime(
     config,
     service,
@@ -71,6 +77,7 @@ async function main(): Promise<void> {
     }),
     feedback,
     traces?.run,
+    topics,
   );
   const { context } = runtime;
   const logger = context.logger('onxbot');
@@ -107,6 +114,12 @@ async function main(): Promise<void> {
       .select(['id', 'messages'])
       .limit(0)
       .execute();
+    if (topics)
+      await db
+        .selectFrom('group_topic_schedules')
+        .select('next_run_at')
+        .limit(0)
+        .execute();
     if (panel && config.observe) {
       const listening = once(panel, 'listening');
       panel.listen(config.observe.port, config.observe.host);
