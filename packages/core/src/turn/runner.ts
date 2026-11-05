@@ -1,5 +1,4 @@
 import type { ModelProvider, TurnMessage } from '@onxbot/model';
-import { match } from 'ts-pattern';
 import type { PreparedContext } from '../context/builder.js';
 import type { Tool } from './tools.js';
 
@@ -9,59 +8,58 @@ export interface TurnResult {
 }
 
 export class TurnRunner {
-  private readonly tools = new Map<string, Tool>();
-  private readonly maxModelCalls: number;
-
   constructor(
     private readonly model: ModelProvider,
-    options: { tools?: readonly Tool[]; maxModelCalls?: number } = {},
+    private readonly options: {
+      tools?: readonly Tool[];
+      maxModelCalls?: number;
+    } = {},
   ) {
-    this.maxModelCalls = options.maxModelCalls ?? 8;
-    if (!Number.isInteger(this.maxModelCalls) || this.maxModelCalls < 1)
+    const limit = options.maxModelCalls ?? 8;
+    if (!Number.isInteger(limit) || limit < 1)
       throw new Error('maxModelCalls must be a positive integer.');
-    for (const tool of options.tools ?? []) {
-      if (this.tools.has(tool.definition.name))
-        throw new Error('Tool names must be unique.');
-      this.tools.set(tool.definition.name, tool);
-    }
+    const names = (options.tools ?? []).map((entry) => entry.name);
+    if (new Set(names).size !== names.length)
+      throw new Error('Tool names must be unique.');
   }
 
-  async run(context: PreparedContext): Promise<TurnResult> {
-    const messages: TurnMessage[] = [];
-    for (let step = 0; step < this.maxModelCalls; step += 1) {
-      const response = await this.model.generate({
-        messages: context.messages(messages),
-        ...(this.tools.size
-          ? { tools: [...this.tools.values()].map((tool) => tool.definition) }
-          : {}),
-      });
-      const reply = await match(response)
-        .with({ type: 'reply' }, ({ text }) => {
-          if (!text.trim()) throw new Error('Model returned an empty reply.');
-          messages.push({ role: 'assistant', content: text });
-          return text;
-        })
-        .with({ type: 'tool-calls' }, async ({ text, calls }) => {
-          if (step + 1 === this.maxModelCalls)
-            throw new Error('Model call limit reached.');
-          if (!calls.length)
-            throw new Error('Model returned an empty tool call list.');
-          messages.push({ role: 'assistant', content: text, toolCalls: calls });
-          for (const call of calls) {
-            const tool = this.tools.get(call.name);
-            if (!tool) throw new Error('Model requested an unavailable tool.');
-            const output = await tool.execute(JSON.parse(call.arguments));
-            messages.push({
-              role: 'tool',
-              content: output,
-              toolCallId: call.id,
-            });
-          }
-          return undefined;
-        })
-        .exhaustive();
-      if (reply !== undefined) return { reply, messages };
+  withTools(tools: readonly Tool[]): TurnRunner {
+    return new TurnRunner(this.model, {
+      ...this.options,
+      tools: [...(this.options.tools ?? []), ...tools],
+    });
+  }
+
+  async run(
+    context: PreparedContext,
+    selectReply?: () => string | undefined,
+  ): Promise<TurnResult> {
+    const tools = this.options.tools;
+    const result = await this.model.generate({
+      messages: context.messages(),
+      ...(tools?.length && {
+        tools: Object.fromEntries(
+          tools.map(({ name, implementation }) => [name, implementation]),
+        ),
+      }),
+      maxSteps: this.options.maxModelCalls ?? 8,
+      prepareMessages: (output) => context.messages(output),
+    });
+    const selected = selectReply?.();
+    const reply = (selected ?? result.text).trim();
+    if (!reply) {
+      if (selected === '') return { reply, messages: result.messages };
+      throw new Error('Model returned an empty reply.');
     }
-    throw new Error('Model call limit reached.');
+    const messages = [...result.messages];
+    const last = messages.at(-1);
+    if (
+      last?.role === 'assistant' &&
+      (typeof last.content === 'string' ||
+        !last.content.some((part) => part.type === 'tool-call'))
+    )
+      messages.pop();
+    messages.push({ role: 'assistant', content: reply });
+    return { reply, messages };
   }
 }

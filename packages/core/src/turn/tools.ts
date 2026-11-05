@@ -1,9 +1,9 @@
-import type { ToolDefinition } from '@onxbot/model';
-import { z } from 'zod';
+import { type ToolSet, tool } from 'ai';
+import type { z } from 'zod';
 
 export interface Tool {
-  definition: ToolDefinition;
-  execute(input: unknown): Promise<string>;
+  name: string;
+  implementation: ToolSet[string];
 }
 
 export function defineTool<Schema extends z.ZodType>(options: {
@@ -13,16 +13,12 @@ export function defineTool<Schema extends z.ZodType>(options: {
   execute(input: z.output<Schema>): Promise<string>;
 }): Tool {
   return {
-    definition: {
-      name: options.name,
+    name: options.name,
+    implementation: tool({
       description: options.description,
-      parameters: z.toJSONSchema(options.input, {
-        target: 'draft-7',
-        io: 'input',
-      }),
-    },
-    async execute(input) {
-      return options.execute(await options.input.parseAsync(input));
-    },
+      inputSchema: options.input,
+      execute: options.execute,
+      toModelOutput: ({ output }) => ({ type: 'text', value: output }),
+    }),
   };
 }

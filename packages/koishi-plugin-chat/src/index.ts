@@ -4,7 +4,10 @@ import {
   type ChatRequest,
   type ChatService,
   type ConversationIdentity,
+  feedbackLabels,
   type GroupChat,
+  type GroupFeedback,
+  type MemoryScope,
 } from '@onxbot/core';
 import type { Context, Session } from 'koishi';
 
@@ -17,6 +20,7 @@ export const name = 'onxbot-chat';
 export interface Config {
   service: ChatService;
   group?: { ids: readonly string[]; chat: GroupChat };
+  feedback?: { ids: readonly string[]; store: GroupFeedback };
 }
 
 function identityFromSession(
@@ -39,17 +43,18 @@ function identityFromSession(
 
 export function apply(context: Context, config: Config): void {
   const logger = context.logger(name);
+  const enabledGroups = new Set(config.group?.ids);
+  const feedbackGroups = new Set(config.feedback?.ids);
   if (config.group) {
-    const { chat, ids } = config.group;
-    const enabledGroups = new Set(ids);
+    const { chat } = config.group;
     context.on('message', async (session) => {
-      const { userId } = session;
+      const { userId, guildId } = session;
       if (
         session.isDirect ||
         userId === session.selfId ||
         !userId ||
-        !session.guildId ||
-        !enabledGroups.has(session.guildId)
+        !guildId ||
+        !enabledGroups.has(guildId)
       )
         return;
 
@@ -61,12 +66,36 @@ export function apply(context: Context, config: Config): void {
           (element) => String(element.attrs.id) === session.selfId,
         ) || quotedUser === session.selfId;
       const text = plainText(elements);
+      const feedback = feedbackGroups.has(guildId)
+        ? config.feedback?.store
+        : undefined;
+      const vote = /^\/bot-feedback\s+(\w+)$/i.exec(text)?.[1]?.toLowerCase();
+      const label = feedbackLabels.find((entry) => entry === vote);
+      if (feedback && label) {
+        try {
+          const quoteId = session.quote?.messageId;
+          const saved =
+            quotedUser === session.selfId &&
+            quoteId &&
+            (await feedback.rate(guildId, quoteId, userId, label));
+          await session.send(
+            h.text(
+              saved ? '已记录反馈。' : '请引用本群一条已采样的 Bot 回复。',
+            ),
+          );
+        } catch {
+          logger.warn('Could not record group feedback.');
+        }
+        return;
+      }
       if (text.startsWith('/') || (!text && !direct)) return;
       const quote = plainText(session.quote?.elements ?? []);
+      const messageId = session.messageId;
+      let replyId: string | undefined;
       try {
         await chat.receive(
           {
-            roomId: session.cid,
+            roomId: guildId,
             speaker: session.username || userId,
             text: text || '（叫了你）',
             addressedTo: direct
@@ -76,10 +105,23 @@ export function apply(context: Context, config: Config): void {
                 : 'group',
             ...(quote && { quote }),
           },
-          async (reply) =>
-            Boolean(
-              (await session.send([h.at(userId), h.text(` ${reply}`)]))?.length,
-            ),
+          async (reply) => {
+            [replyId] =
+              (await session.send([h.at(userId), h.text(` ${reply}`)])) ?? [];
+            return Boolean(replyId);
+          },
+          feedback && messageId
+            ? (decision) => {
+                void feedback
+                  .record({
+                    ...decision,
+                    groupId: guildId,
+                    messageId,
+                    ...(replyId && { replyId }),
+                  })
+                  .catch(() => logger.warn('Could not record group decision.'));
+              }
+            : undefined,
         );
       } catch (error) {
         logger.warn(
@@ -102,8 +144,21 @@ export function apply(context: Context, config: Config): void {
   ) => {
     const identity = session && identityFromSession(session);
     if (!identity) return h.text('无法识别当前会话。');
+    const guildId = session?.guildId;
+    const scope: MemoryScope | undefined =
+      session?.isDirect && /^\d{1,32}$/.test(identity.userId)
+        ? { kind: 'user', id: identity.userId }
+        : guildId && enabledGroups.has(guildId)
+          ? { kind: 'group', id: guildId }
+          : undefined;
     try {
-      return h.text(await config.service.execute({ ...request, identity }));
+      return h.text(
+        await config.service.execute({
+          ...request,
+          identity,
+          ...(request.type === 'chat' && scope && { memoryScope: scope }),
+        }),
+      );
     } catch (error) {
       if (error instanceof ChatInputError) return h.text(error.message);
       logger.warn(

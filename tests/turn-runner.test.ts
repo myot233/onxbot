@@ -5,10 +5,7 @@ import {
   defineTool,
   TurnRunner,
 } from '../packages/core/src/index.js';
-import type {
-  ModelMessage,
-  ModelProvider,
-} from '../packages/model/src/index.js';
+import { sdkModel, sdkResult } from './helpers/model.js';
 
 async function context() {
   return new ContextBuilder({
@@ -21,24 +18,27 @@ async function context() {
   });
 }
 
+function callWeather(input: string) {
+  return sdkResult(
+    [{ type: 'tool-call', toolCallId: 'c1', toolName: 'weather', input }],
+    'tool-calls',
+  );
+}
+
 describe('model and tool execution', () => {
-  it('executes validated tool calls and returns the complete transcript', async () => {
-    const requests: ModelMessage[][] = [];
-    const model: ModelProvider = {
-      async generate({ messages, tools }) {
-        requests.push([...messages]);
-        expect(tools?.[0]?.name).toBe('weather');
-        return requests.length === 1
-          ? {
-              type: 'tool-calls',
-              text: '',
-              calls: [
-                { id: 'c1', name: 'weather', arguments: '{"city":"Hangzhou"}' },
-              ],
-            }
-          : { type: 'reply', text: `forecast: ${messages.at(-1)?.content}` };
-      },
-    };
+  it('executes validated tools and stores the SDK transcript', async () => {
+    const model = sdkModel(({ prompt, tools }) => {
+      expect(tools?.[0]).toMatchObject({ name: 'weather' });
+      const last = prompt.at(-1);
+      if (last?.role !== 'tool') return callWeather('{"city":"Hangzhou"}');
+      const result = last.content[0];
+      expect(result).toMatchObject({
+        type: 'tool-result',
+        toolName: 'weather',
+        output: { type: 'text', value: 'Hangzhou: sunny' },
+      });
+      return sdkResult([{ type: 'text', text: 'forecast: Hangzhou: sunny' }]);
+    });
     const runner = new TurnRunner(model, {
       tools: [
         defineTool({
@@ -53,32 +53,37 @@ describe('model and tool execution', () => {
     });
     const result = await runner.run(await context());
     expect(result.reply).toBe('forecast: Hangzhou: sunny');
-    expect(result.messages).toEqual([
+    expect(result.messages).toMatchObject([
       {
         role: 'assistant',
-        content: '',
-        toolCalls: [
-          { id: 'c1', name: 'weather', arguments: '{"city":"Hangzhou"}' },
+        content: [
+          {
+            type: 'tool-call',
+            toolCallId: 'c1',
+            toolName: 'weather',
+            input: { city: 'Hangzhou' },
+          },
         ],
       },
-      { role: 'tool', content: 'Hangzhou: sunny', toolCallId: 'c1' },
+      {
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId: 'c1',
+            toolName: 'weather',
+            output: { type: 'text', value: 'Hangzhou: sunny' },
+          },
+        ],
+      },
       { role: 'assistant', content: 'forecast: Hangzhou: sunny' },
     ]);
-    expect(requests[1]?.slice(-2)).toEqual(result.messages.slice(0, 2));
   });
 
   it('rejects invalid arguments before executing a tool', async () => {
     let executed = false;
     const runner = new TurnRunner(
-      {
-        async generate() {
-          return {
-            type: 'tool-calls',
-            text: '',
-            calls: [{ id: 'c1', name: 'weather', arguments: '{"city":42}' }],
-          };
-        },
-      },
+      sdkModel(() => callWeather('{"city":42}')),
       {
         tools: [
           defineTool({
@@ -100,15 +105,7 @@ describe('model and tool execution', () => {
   it('stops at the model call limit before executing another tool', async () => {
     let executions = 0;
     const runner = new TurnRunner(
-      {
-        async generate() {
-          return {
-            type: 'tool-calls',
-            text: '',
-            calls: [{ id: 'c1', name: 'weather', arguments: '{}' }],
-          };
-        },
-      },
+      sdkModel(() => callWeather('{}')),
       {
         maxModelCalls: 2,
         tools: [
@@ -125,7 +122,7 @@ describe('model and tool execution', () => {
       },
     );
     await expect(runner.run(await context())).rejects.toThrow(
-      'Model call limit',
+      'tool choice was none',
     );
     expect(executions).toBe(1);
   });

@@ -15,6 +15,7 @@ import {
 } from '../packages/model/src/index.js';
 import { createChat } from './helpers/chat.js';
 import { createTestDatabase } from './helpers/database.js';
+import { sdkModel, sdkResult, textReply } from './helpers/model.js';
 
 describe('PostgreSQL 18 conversation persistence', () => {
   let fixture: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -39,7 +40,7 @@ describe('PostgreSQL 18 conversation persistence', () => {
   const provider: ModelProvider = {
     async generate({ messages }) {
       requests.push([...messages]);
-      return { type: 'reply', text: `reply:${messages.at(-1)?.content}` };
+      return textReply(`reply:${messages.at(-1)?.content}`);
     },
   };
   const service = () =>
@@ -241,7 +242,7 @@ describe('PostgreSQL 18 conversation persistence', () => {
         async generate({ messages }) {
           concurrentRequests.push([...messages]);
           await new Promise((resolve) => setTimeout(resolve, 30));
-          return { type: 'reply', text: `reply:${messages.at(-1)?.content}` };
+          return textReply(`reply:${messages.at(-1)?.content}`);
         },
       },
       options,
@@ -293,7 +294,16 @@ describe('PostgreSQL 18 conversation persistence', () => {
               }
             : { content: `reply:${last.content}` };
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify({ choices: [{ message }] }));
+      response.end(
+        JSON.stringify({
+          choices: [
+            {
+              message,
+              finish_reason: 'tool_calls' in message ? 'tool_calls' : 'stop',
+            },
+          ],
+        }),
+      );
     });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -335,7 +345,7 @@ describe('PostgreSQL 18 conversation persistence', () => {
         { role: 'user', content: 'weather' },
         {
           role: 'assistant',
-          content: '',
+          content: null,
           tool_calls: [
             {
               id: 'weather-1',
@@ -374,16 +384,20 @@ describe('PostgreSQL 18 conversation persistence', () => {
     let calls = 0;
     const chat = createChat(
       createConversationStore(fixture.db),
-      {
-        async generate() {
-          if (calls++ > 0) throw new Error('final request failed');
-          return {
-            type: 'tool-calls',
-            text: '',
-            calls: [{ id: 'c1', name: 'weather', arguments: '{}' }],
-          };
-        },
-      },
+      sdkModel(() => {
+        if (calls++ > 0) throw new Error('final request failed');
+        return sdkResult(
+          [
+            {
+              type: 'tool-call',
+              toolCallId: 'c1',
+              toolName: 'weather',
+              input: '{}',
+            },
+          ],
+          'tool-calls',
+        );
+      }),
       options,
       [
         defineTool({

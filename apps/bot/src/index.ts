@@ -1,11 +1,18 @@
+import { createHash } from 'node:crypto';
 import {
   ChatService,
   ContextBuilder,
+  ConversationAgent,
   ConversationService,
   GroupChat,
+  MarkdownMemory,
   TurnRunner,
 } from '@onxbot/core';
-import { createConversationStore, createDatabase } from '@onxbot/database';
+import {
+  createConversationStore,
+  createDatabase,
+  createGroupFeedback,
+} from '@onxbot/database';
 import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
 import { createBotRuntime } from './runtime.js';
@@ -14,19 +21,47 @@ async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const db = createDatabase(config.databaseUrl);
   const model = createModelProvider(config.provider);
+  const runner = new TurnRunner(model);
+  const memory = new MarkdownMemory(config.memoryDir, (error) =>
+    console.warn('Memory write failed:', error),
+  );
+  const agent =
+    config.provider.type === 'echo'
+      ? undefined
+      : new ConversationAgent(runner, memory);
   const service = new ChatService({
     conversations: new ConversationService(createConversationStore(db)),
     context: new ContextBuilder(config.chat),
-    runner: new TurnRunner(model),
+    runner,
+    ...(agent && { agent }),
     maxInputChars: config.chat.maxInputChars,
   });
+  const feedback =
+    config.feedbackGroupIds.length && config.provider.type === 'openai'
+      ? createGroupFeedback(
+          db,
+          createHash('sha256')
+            .update(
+              JSON.stringify([
+                'group-agent-v1',
+                config.provider.model,
+                config.groupSystemPrompt,
+              ]),
+            )
+            .digest('hex')
+            .slice(0, 16),
+          config.onebot.token,
+        )
+      : undefined;
   const runtime = createBotRuntime(
     config,
     service,
     new GroupChat(model, {
       systemPrompt: config.groupSystemPrompt,
       spontaneous: config.provider.type !== 'echo',
+      ...(agent && { agent }),
     }),
+    feedback,
   );
   const { context } = runtime;
   const logger = context.logger('onxbot');
@@ -37,7 +72,7 @@ async function main(): Promise<void> {
       try {
         await runtime.stop();
       } finally {
-        await db.destroy();
+        await Promise.all([db.destroy(), memory.close()]);
       }
     })());
   const onSignal = () => {
@@ -52,8 +87,8 @@ async function main(): Promise<void> {
 
   try {
     await db
-      .selectFrom('messages')
-      .select(['id', 'tool_calls', 'tool_call_id'])
+      .selectFrom('conversation_turns')
+      .select(['id', 'messages'])
       .limit(0)
       .execute();
     await context.start();

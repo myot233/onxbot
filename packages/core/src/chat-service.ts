@@ -2,6 +2,7 @@ import { match } from 'ts-pattern';
 import type { ContextBuilder } from './context/builder.js';
 import type { ConversationService } from './conversation/service.js';
 import { ChatInputError } from './errors.js';
+import type { ConversationAgent } from './turn/agent.js';
 import type { TurnRunner } from './turn/runner.js';
 import type { ChatRequest } from './types.js';
 
@@ -11,6 +12,7 @@ export class ChatService {
       conversations: ConversationService;
       context: ContextBuilder;
       runner: TurnRunner;
+      agent?: ConversationAgent;
       maxInputChars: number;
     },
   ) {}
@@ -21,7 +23,7 @@ export class ChatService {
         await this.modules.conversations.reset(identity);
         return '已清空当前会话。';
       })
-      .with({ type: 'chat' }, async ({ identity, text }) => {
+      .with({ type: 'chat' }, async ({ identity, text, memoryScope }) => {
         const input = text.trim();
         if (!input)
           throw new ChatInputError('请输入对话内容，例如：/chat 你好');
@@ -32,10 +34,16 @@ export class ChatService {
         }
         return this.modules.conversations.reply(
           { identity, input, historyTurns: this.modules.context.historyTurns },
-          async (history) =>
-            this.modules.runner.run(
-              await this.modules.context.build({ identity, input, history }),
-            ),
+          async (history) => {
+            const context = await this.modules.context.build({
+              identity,
+              input,
+              history,
+            });
+            return this.modules.agent && memoryScope
+              ? this.modules.agent.run(context, memoryScope)
+              : this.modules.runner.run(context);
+          },
         );
       })
       .exhaustive();
