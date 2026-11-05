@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import {
   ChatService,
   ContextBuilder,
@@ -15,12 +16,19 @@ import {
 } from '@onxbot/database';
 import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
+import { createObservationPanel } from './observe/panel.js';
+import { TraceBuffer } from './observe/traces.js';
 import { createBotRuntime } from './runtime.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const db = createDatabase(config.databaseUrl);
-  const model = createModelProvider(config.provider);
+  const traces = config.observe ? new TraceBuffer() : undefined;
+  const panel =
+    traces &&
+    config.observe &&
+    createObservationPanel(traces, config.observe.password);
+  const model = createModelProvider(config.provider, traces?.record);
   const runner = new TurnRunner(model);
   const memory = new MarkdownMemory(config.memoryDir, (error) =>
     console.warn('Memory write failed:', error),
@@ -62,6 +70,7 @@ async function main(): Promise<void> {
       ...(agent && { agent }),
     }),
     feedback,
+    traces?.run,
   );
   const { context } = runtime;
   const logger = context.logger('onxbot');
@@ -72,7 +81,14 @@ async function main(): Promise<void> {
       try {
         await runtime.stop();
       } finally {
-        await Promise.all([db.destroy(), memory.close()]);
+        await Promise.all([
+          db.destroy(),
+          memory.close(),
+          panel &&
+            new Promise<void>((resolve) => {
+              panel.close(() => resolve());
+            }),
+        ]);
       }
     })());
   const onSignal = () => {
@@ -91,6 +107,16 @@ async function main(): Promise<void> {
       .select(['id', 'messages'])
       .limit(0)
       .execute();
+    if (panel && config.observe) {
+      const listening = once(panel, 'listening');
+      panel.listen(config.observe.port, config.observe.host);
+      await listening;
+      logger.info(
+        'Observation panel listening on %s:%s',
+        config.observe.host,
+        config.observe.port,
+      );
+    }
     await context.start();
     logger.info(
       'Started: OneBot %s, provider %s. Commands: /chat <text>, /reset',

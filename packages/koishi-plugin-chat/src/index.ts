@@ -19,6 +19,7 @@ export const name = 'onxbot-chat';
 
 export interface Config {
   service: ChatService;
+  observe?: <T>(session: string, work: () => Promise<T>) => Promise<T>;
   group?: { ids: readonly string[]; chat: GroupChat };
   feedback?: { ids: readonly string[]; store: GroupFeedback };
 }
@@ -93,36 +94,45 @@ export function apply(context: Context, config: Config): void {
       const messageId = session.messageId;
       let replyId: string | undefined;
       try {
-        await chat.receive(
-          {
-            roomId: guildId,
-            speaker: session.username || userId,
-            text: text || '（叫了你）',
-            addressedTo: direct
-              ? 'bot'
-              : mentions.length || session.quote
-                ? 'someone-else'
-                : 'group',
-            ...(quote && { quote }),
-          },
-          async (reply) => {
-            [replyId] =
-              (await session.send([h.at(userId), h.text(` ${reply}`)])) ?? [];
-            return Boolean(replyId);
-          },
-          feedback && messageId
-            ? (decision) => {
-                void feedback
-                  .record({
-                    ...decision,
-                    groupId: guildId,
-                    messageId,
-                    ...(replyId && { replyId }),
-                  })
-                  .catch(() => logger.warn('Could not record group decision.'));
-              }
-            : undefined,
-        );
+        const run = () =>
+          chat.receive(
+            {
+              roomId: guildId,
+              speaker: session.username || userId,
+              text: text || '（叫了你）',
+              addressedTo: direct
+                ? 'bot'
+                : mentions.length || session.quote
+                  ? 'someone-else'
+                  : 'group',
+              ...(quote && { quote }),
+            },
+            async (reply) => {
+              [replyId] =
+                (await session.send([h.at(userId), h.text(` ${reply}`)])) ?? [];
+              return Boolean(replyId);
+            },
+            feedback && messageId
+              ? (decision) => {
+                  void feedback
+                    .record({
+                      ...decision,
+                      groupId: guildId,
+                      messageId,
+                      ...(replyId && { replyId }),
+                    })
+                    .catch(() =>
+                      logger.warn('Could not record group decision.'),
+                    );
+                }
+              : undefined,
+          );
+        if (config.observe)
+          await config.observe(
+            `${session.platform}/${session.selfId}/group/${guildId}`,
+            run,
+          );
+        else await run();
       } catch (error) {
         logger.warn(
           'Group chat failed: %s',
@@ -152,12 +162,20 @@ export function apply(context: Context, config: Config): void {
           ? { kind: 'group', id: guildId }
           : undefined;
     try {
-      return h.text(
-        await config.service.execute({
+      const run = () =>
+        config.service.execute({
           ...request,
           identity,
           ...(request.type === 'chat' && scope && { memoryScope: scope }),
-        }),
+        });
+      const { platform, botId, channelId, userId } = identity;
+      return h.text(
+        config.observe && request.type === 'chat'
+          ? await config.observe(
+              `${platform}/${botId}/chat/${channelId}/${userId}`,
+              run,
+            )
+          : await run(),
       );
     } catch (error) {
       if (error instanceof ChatInputError) return h.text(error.message);

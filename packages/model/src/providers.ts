@@ -5,7 +5,7 @@ import {
   isStepCount,
   type LanguageModel,
 } from 'ai';
-import type { ModelProvider } from './types.js';
+import type { ModelProvider, ModelTrace } from './types.js';
 
 export type ProviderConfig =
   | { type: 'echo' }
@@ -19,7 +19,7 @@ export type ProviderConfig =
 
 export function createSdkModelProvider(
   model: LanguageModel,
-  options: { timeoutMs?: number; deepSeek?: boolean } = {},
+  options: { timeoutMs?: number; deepSeek?: boolean; trace?: ModelTrace } = {},
 ): ModelProvider {
   return {
     async generate({ messages, tools, maxSteps = 1, prepareMessages }) {
@@ -30,6 +30,54 @@ export function createSdkModelProvider(
           allowSystemInMessages: true,
           maxRetries: 0,
           stopWhen: isStepCount(maxSteps),
+          ...(options.trace && {
+            onLanguageModelCallStart: ({
+              modelId,
+              messages,
+              instructions,
+              tools,
+            }) => {
+              options.trace?.({
+                phase: 'input',
+                data: {
+                  modelId,
+                  instructions,
+                  messages,
+                  tools: tools?.map(({ name }) => name),
+                },
+              });
+            },
+            onStepEnd: ({
+              finishReason,
+              usage,
+              text,
+              toolCalls,
+              toolResults,
+            }) => {
+              options.trace?.({
+                phase: 'output',
+                data: {
+                  finishReason,
+                  usage,
+                  text,
+                  toolCalls: toolCalls.map(
+                    ({ toolName, toolCallId, input }) => ({
+                      toolName,
+                      toolCallId,
+                      input,
+                    }),
+                  ),
+                  toolResults: toolResults.map(
+                    ({ toolName, toolCallId, output }) => ({
+                      toolName,
+                      toolCallId,
+                      output,
+                    }),
+                  ),
+                },
+              });
+            },
+          }),
           ...(tools && { tools }),
           ...(options.timeoutMs !== undefined && {
             timeout: { stepMs: options.timeoutMs },
@@ -78,7 +126,10 @@ export function createSdkModelProvider(
   };
 }
 
-export function createModelProvider(config: ProviderConfig): ModelProvider {
+export function createModelProvider(
+  config: ProviderConfig,
+  trace?: ModelTrace,
+): ModelProvider {
   if (config.type === 'echo')
     return {
       async generate({ messages }) {
@@ -96,5 +147,6 @@ export function createModelProvider(config: ProviderConfig): ModelProvider {
   return createSdkModelProvider(provider(config.model), {
     timeoutMs: config.timeoutMs,
     deepSeek: new URL(config.baseUrl).hostname === 'api.deepseek.com',
+    ...(trace && { trace }),
   });
 }
