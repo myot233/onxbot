@@ -77,7 +77,7 @@ OPENAI_API_KEY=你的密钥
 OPENAI_MODEL=你的模型名称
 ```
 
-模型请求和工具循环由 Vercel AI SDK 执行，支持 OpenAI 兼容的 `/chat/completions`。`OPENAI_BASE_URL` 应设置为服务商的 API 基地址。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
+模型请求和工具循环由 Vercel AI SDK 执行，支持 OpenAI 兼容的 `/chat/completions`。 使用 DeepSeek 时可设 `DEEPSEEK_REASONING_EFFORT=high` 启用高强度推理。工具回合会按协议回传推理内容，观测面板只标记该内容已隐藏。`OPENAI_BASE_URL` 应设置为服务商的 API 基地址。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
 
 ### 定时发起群聊话题
 
@@ -85,7 +85,7 @@ OPENAI_MODEL=你的模型名称
 
 ### Markdown 记忆
 
-使用真实模型时，Agent 可以在同一回合调用 `send_message`、`list_memory`、`read_memory` 和 `write_memory`。自然群聊只在 Agent 调用 `send_message` 时发送，通常把较长回复拆成两到三条短消息，每条最多 100 字，第一条 @ 触发者。指令 `/chat` 会在数据库提交后回复。默认目录为 `memory/group/<群号>/` 和 `memory/user/<用户号>/`，可以用 `CHAT_MEMORY_DIR` 更换根目录。配置了自然参与的群使用该群目录，私聊 `/chat` 使用该用户目录。
+使用真实模型时，Agent 可以在同一回合调用 `send_message`、`list_memory`、`read_memory` 和 `write_memory`。自然群聊的 Agent 每次调用 `send_message` 发一条最多 100 字的消息。它可以在后续步骤继续发，较长回复通常拆成两到三条短消息。回复群友时，只有第一条 @ 触发者。自定义群聊提示词中的工具示例应使用 `{"text":"…"}`。指令 `/chat` 会在数据库提交后回复。默认目录为 `memory/group/<群号>/` 和 `memory/user/<用户号>/`，可以用 `CHAT_MEMORY_DIR` 更换根目录。配置了自然参与的群使用该群目录，私聊 `/chat` 使用该用户目录。 群聊 Agent 会主动记录有长期价值的群内约定和成员偏好，即使它选择保持沉默。群共享记忆用 `scope=group`，当前发言者在本群的个人记忆用 `scope=user`，存放在 `memory/user/<用户号>/group/<群号>/`。定时回合只访问群共享记忆。
 
 模型可以创建和更新多份按主题命名的 `.md` 文件。`write_memory` 排队后立即返回，后台串行写盘并原子替换文件。队列中的内容可以立即读到，正常退出时会等队列写完。容器部署时应把 `CHAT_MEMORY_DIR` 指到可写的持久卷。`/reset` 清理指令对话历史，Markdown 记忆单独管理。
 

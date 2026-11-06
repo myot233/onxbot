@@ -33,6 +33,7 @@ const environment = z.object({
     .default('https://api.openai.com/v1'),
   OPENAI_API_KEY: z.string().trim().default(''),
   OPENAI_MODEL: nonempty.default('gpt-4.1-mini'),
+  DEEPSEEK_REASONING_EFFORT: z.enum(['low', 'high', 'max']).optional(),
   CHAT_SYSTEM_PROMPT: nonempty.default('你是一个友善、简洁的中文对话助手。'),
   CHAT_GROUP_SYSTEM_PROMPT: z.string().trim().default(''),
   CHAT_MEMORY_DIR: nonempty.default('memory'),
@@ -98,6 +99,9 @@ export function loadConfig(
         baseUrl: env.OPENAI_BASE_URL,
         apiKey: env.OPENAI_API_KEY,
         model: env.OPENAI_MODEL,
+        ...(env.DEEPSEEK_REASONING_EFFORT && {
+          deepSeekReasoningEffort: env.DEEPSEEK_REASONING_EFFORT,
+        }),
         timeoutMs: env.CHAT_TIMEOUT_MS,
       };
     })
