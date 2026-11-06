@@ -18,6 +18,8 @@ export type MemoryScope =
   | { kind: 'user'; id: string };
 
 const maxFileBytes = 8_192;
+const recordedAtFooter =
+  /\n\nRecorded at: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
 const scopeId = z.string().regex(/^\d{1,32}$/);
 const filename = z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,59}\.md$/u);
 
@@ -123,7 +125,8 @@ export class MarkdownMemory {
         }),
         execute: async ({ scope: requested, filename: name, content }) => {
           const { parts, folder } = directory(requested);
-          const markdown = `${content}\n`;
+          const body = content.replace(recordedAtFooter, '');
+          const markdown = `${body}\n\nRecorded at: ${new Date().toISOString()}\n`;
           if (Buffer.byteLength(markdown) > maxFileBytes)
             return '文件过大，请精简或分成多份。';
           if (this.closed || this.queued >= 128)

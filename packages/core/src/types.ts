@@ -6,6 +6,7 @@ export type ChatRequest =
       type: 'chat';
       identity: ConversationIdentity;
       text: string;
+      sentAt?: string;
       memoryScope?: MemoryScope;
     }
   | { type: 'reset'; identity: ConversationIdentity };

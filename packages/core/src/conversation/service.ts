@@ -10,6 +10,7 @@ export class ConversationService {
       identity: ConversationIdentity;
       input: string;
       historyTurns: number;
+      sentAt?: string | undefined;
     },
     generate: (history: readonly ConversationMessage[]) => Promise<TurnResult>,
   ): Promise<string> {
@@ -19,7 +20,7 @@ export class ConversationService {
           ? []
           : await session.getRecentTurns(request.historyTurns);
       const result = await generate(history);
-      await session.appendTurn(request.input, result.messages);
+      await session.appendTurn(request.input, result.messages, request.sentAt);
       return result.reply;
     });
   }

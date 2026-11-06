@@ -23,11 +23,12 @@ it('keeps an ambient group turn silent when it only writes memory', async () => 
   const memory = new MarkdownMemory(root, errors);
   const send = vi.fn(async () => true);
   let step = 0;
-  const model = sdkModel(() =>
-    step++ === 0
-      ? call('write_memory', { filename: '会议.md', content: '周二见。' })
-      : sdkResult([{ type: 'text', text: '记忆已保存。' }]),
-  );
+  const sentAt = '2026-11-06T16:35:18.000Z';
+  const model = sdkModel(({ prompt }) => {
+    if (step++ > 0) return sdkResult([{ type: 'text', text: '记忆已保存。' }]);
+    expect(JSON.stringify(prompt)).toContain(sentAt);
+    return call('write_memory', { filename: '会议.md', content: '周二见。' });
+  });
   const group = new GroupChat(model, {
     systemPrompt: 'Be concise.',
     spontaneous: true,
@@ -37,12 +38,15 @@ it('keeps an ambient group turn silent when it only writes memory', async () => 
 
   try {
     await group.receive({ ...message, speaker: 'A', text: '哪天见？' }, send);
-    await group.receive({ ...message, speaker: 'B', text: '周二见。' }, send);
+    await group.receive(
+      { ...message, speaker: 'B', text: '周二见。', sentAt },
+      send,
+    );
     expect(send).not.toHaveBeenCalled();
     await memory.close();
     expect(errors).not.toHaveBeenCalled();
-    expect(await readFile(join(root, 'group/42/会议.md'), 'utf8')).toBe(
-      '周二见。\n',
+    expect(await readFile(join(root, 'group/42/会议.md'), 'utf8')).toMatch(
+      /^周二见。\n\nRecorded at: \d{4}-\d\d-\d\dT[^\n]+Z\n$/,
     );
   } finally {
     await memory.close();
@@ -122,8 +126,8 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
     release();
     await memory.close();
     expect(errors).not.toHaveBeenCalled();
-    expect(await readFile(join(root, 'group/42/会议.md'), 'utf8')).toBe(
-      '# 会议\n周二见。\n',
+    expect(await readFile(join(root, 'group/42/会议.md'), 'utf8')).toMatch(
+      /^# 会议\n周二见。\n\nRecorded at: \d{4}-\d\d-\d\dT[^\n]+Z\n$/,
     );
 
     const reloaded = new MarkdownMemory(root, errors);
@@ -336,12 +340,12 @@ it('saves group facts and member preferences silently in isolated scopes', async
 
     await memory.close();
     expect(errors).not.toHaveBeenCalled();
-    expect(await readFile(join(root, 'group/42/活动.md'), 'utf8')).toBe(
-      '每周二读书会。\n',
+    expect(await readFile(join(root, 'group/42/活动.md'), 'utf8')).toMatch(
+      /^每周二读书会。\n\nRecorded at: \d{4}-\d\d-\d\dT[^\n]+Z\n$/,
     );
-    expect(await readFile(join(root, 'user/7/group/42/偏好.md'), 'utf8')).toBe(
-      '喜欢科幻小说。\n',
-    );
+    expect(
+      await readFile(join(root, 'user/7/group/42/偏好.md'), 'utf8'),
+    ).toMatch(/^喜欢科幻小说。\n\nRecorded at: \d{4}-\d\d-\d\dT[^\n]+Z\n$/);
   } finally {
     await memory.close();
     await rm(root, { recursive: true, force: true });

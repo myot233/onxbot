@@ -2,7 +2,9 @@ import type { ModelMessage, ToolSet } from 'ai';
 
 export type { ModelMessage } from 'ai';
 export type TurnMessage = Extract<ModelMessage, { role: 'assistant' | 'tool' }>;
-export type ConversationMessage = Exclude<ModelMessage, { role: 'system' }>;
+export type ConversationMessage = Exclude<ModelMessage, { role: 'system' }> & {
+  sentAt?: string;
+};
 
 export interface ModelRequest {
   messages: readonly ModelMessage[];

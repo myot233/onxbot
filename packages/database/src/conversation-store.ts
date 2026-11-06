@@ -36,14 +36,21 @@ export function createConversationStore(
               .execute();
             return rows.reverse().flatMap((row) => row.messages);
           },
-          async appendTurn(input, output) {
+          async appendTurn(input, output, sentAt) {
+            const completedAt = new Date().toISOString();
             await transaction
               .insertInto('conversation_turns')
               .values({
                 conversation_id: conversation.id,
                 messages: JSON.stringify([
-                  { role: 'user', content: input },
-                  ...output,
+                  { role: 'user', content: input, ...(sentAt && { sentAt }) },
+                  ...output.map((message) =>
+                    sentAt &&
+                    message.role === 'assistant' &&
+                    typeof message.content === 'string'
+                      ? { ...message, sentAt: completedAt }
+                      : message,
+                  ),
                 ]),
               })
               .execute();

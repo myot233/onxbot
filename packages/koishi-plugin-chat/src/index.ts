@@ -120,7 +120,11 @@ export function apply(context: Context, config: Config): void {
                     await recordTopicLine(
                       bot.selfId,
                       topic.groupId,
-                      { speaker: '你（onxbot）', text: reply },
+                      {
+                        speaker: '你（onxbot）',
+                        text: reply,
+                        sentAt: new Date().toISOString(),
+                      },
                       false,
                     );
                     return true;
@@ -209,6 +213,11 @@ export function apply(context: Context, config: Config): void {
         roomId: guildId,
         userId,
         speaker: session.username || userId,
+        sentAt: new Date(
+          Number.isFinite(session.timestamp) && session.timestamp > 0
+            ? session.timestamp
+            : Date.now(),
+        ).toISOString(),
         text: text || (forwarded ? '[Forwarded QQ message]' : '（叫了你）'),
         addressedTo: direct
           ? 'bot'
@@ -242,7 +251,11 @@ export function apply(context: Context, config: Config): void {
                 await recordTopicLine(
                   session.selfId,
                   guildId,
-                  { speaker: '你（onxbot）', text: reply },
+                  {
+                    speaker: '你（onxbot）',
+                    text: reply,
+                    sentAt: new Date().toISOString(),
+                  },
                   false,
                 );
               return Boolean(id);
@@ -310,6 +323,15 @@ export function apply(context: Context, config: Config): void {
           ...request,
           identity,
           ...(request.type === 'chat' && scope && { memoryScope: scope }),
+          ...(request.type === 'chat' && {
+            sentAt: new Date(
+              session &&
+                Number.isFinite(session.timestamp) &&
+                session.timestamp > 0
+                ? session.timestamp
+                : Date.now(),
+            ).toISOString(),
+          }),
         });
       const { platform, botId, channelId, userId } = identity;
       return h.text(
