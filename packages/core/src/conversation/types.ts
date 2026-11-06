@@ -10,7 +10,11 @@ export interface ConversationIdentity {
 export interface ConversationSession {
   /** Read complete recent turns in chronological order. */
   getRecentTurns(limit: number): Promise<ConversationMessage[]>;
-  appendTurn(input: string, output: readonly TurnMessage[]): Promise<void>;
+  appendTurn(
+    input: string,
+    output: readonly TurnMessage[],
+    sentAt?: string,
+  ): Promise<void>;
   clear(): Promise<void>;
 }
 

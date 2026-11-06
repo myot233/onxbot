@@ -54,10 +54,18 @@ export class ContextBuilder {
   }
 
   async build(
-    request: ContextRequest & { history: readonly ConversationMessage[] },
+    request: ContextRequest & {
+      history: readonly ConversationMessage[];
+      sentAt?: string | undefined;
+    },
   ): Promise<PreparedContext> {
     const prefix: ModelMessage[] = [
-      { role: 'system', content: this.options.systemPrompt },
+      {
+        role: 'system',
+        content: request.sentAt
+          ? `${this.options.systemPrompt}\nThe sentAt metadata gives message time in ISO 8601. Interpret relative dates in Asia/Shanghai. Earlier messages without timestamps have unknown times.`
+          : this.options.systemPrompt,
+      },
     ];
     const sources = this.options.sources ?? [];
     const content = await Promise.all(
@@ -77,8 +85,27 @@ export class ContextBuilder {
       if (userMessageRoleSchema.safeParse(message).success) turns.push([]);
       turns.at(-1)?.push(message);
     }
-    const recent = takeRight(turns, this.historyTurns);
-    const current: ModelMessage = { role: 'user', content: request.input };
+    const recent = takeRight(turns, this.historyTurns).map((turn) =>
+      turn.map(
+        ({ sentAt, ...message }): ModelMessage =>
+          sentAt &&
+          message.role !== 'tool' &&
+          typeof message.content === 'string'
+            ? { ...message, content: `[sentAt: ${sentAt}]\n${message.content}` }
+            : message,
+      ),
+    );
+    const current: ModelMessage[] = [
+      ...(request.sentAt
+        ? [
+            {
+              role: 'user' as const,
+              content: JSON.stringify({ sentAt: request.sentAt }),
+            },
+          ]
+        : []),
+      { role: 'user', content: request.input },
+    ];
     const budget = this.options.budget;
     return {
       messages(output = []) {
@@ -86,7 +113,7 @@ export class ContextBuilder {
           const messages = [
             ...prefix,
             ...recent.slice(start).flat(),
-            current,
+            ...current,
             ...output,
           ];
           if (!budget || budget.countTokens(messages) <= budget.maxTokens)

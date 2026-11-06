@@ -23,29 +23,38 @@ export class ChatService {
         await this.modules.conversations.reset(identity);
         return '已清空当前会话。';
       })
-      .with({ type: 'chat' }, async ({ identity, text, memoryScope }) => {
-        const input = text.trim();
-        if (!input)
-          throw new ChatInputError('请输入对话内容，例如：/chat 你好');
-        if (input.length > this.modules.maxInputChars) {
-          throw new ChatInputError(
-            `消息过长，最多 ${this.modules.maxInputChars} 个字符。`,
-          );
-        }
-        return this.modules.conversations.reply(
-          { identity, input, historyTurns: this.modules.context.historyTurns },
-          async (history) => {
-            const context = await this.modules.context.build({
+      .with(
+        { type: 'chat' },
+        async ({ identity, text, memoryScope, sentAt }) => {
+          const input = text.trim();
+          if (!input)
+            throw new ChatInputError('请输入对话内容，例如：/chat 你好');
+          if (input.length > this.modules.maxInputChars) {
+            throw new ChatInputError(
+              `消息过长，最多 ${this.modules.maxInputChars} 个字符。`,
+            );
+          }
+          return this.modules.conversations.reply(
+            {
               identity,
               input,
-              history,
-            });
-            return this.modules.agent && memoryScope
-              ? this.modules.agent.run(context, memoryScope)
-              : this.modules.runner.run(context);
-          },
-        );
-      })
+              sentAt,
+              historyTurns: this.modules.context.historyTurns,
+            },
+            async (history) => {
+              const context = await this.modules.context.build({
+                identity,
+                input,
+                sentAt,
+                history,
+              });
+              return this.modules.agent && memoryScope
+                ? this.modules.agent.run(context, memoryScope)
+                : this.modules.runner.run(context);
+            },
+          );
+        },
+      )
       .exhaustive();
   }
 }

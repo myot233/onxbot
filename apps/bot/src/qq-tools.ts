@@ -40,6 +40,13 @@ const messageSchema = z.object({
     .object({ nickname: z.string().optional(), card: z.string().optional() })
     .optional(),
   message: z.unknown(),
+  time: z
+    .number()
+    .int()
+    .positive()
+    .max(253_402_300_799)
+    .optional()
+    .catch(undefined),
 });
 const forwardNodeSchema = z.object({
   type: z.literal('node'),
@@ -98,11 +105,12 @@ function summarizeMessages(messages: unknown[], limit: number) {
     }
     const normal = messageSchema.safeParse(message);
     if (!normal.success) return [];
-    const { sender, message: body } = normal.data;
+    const { sender, message: body, time } = normal.data;
     return [
       {
         speaker: (sender?.card || sender?.nickname)?.slice(0, 60),
         text: summarizeSegments(body),
+        ...(time && { sentAt: new Date(time * 1_000).toISOString() }),
       },
     ];
   });
