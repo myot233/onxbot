@@ -181,6 +181,7 @@ export function apply(context: Context, config: Config): void {
       const messageId = session.messageId;
       const groupMessage: GroupMessage = {
         roomId: guildId,
+        userId,
         speaker: session.username || userId,
         text: text || '（叫了你）',
         addressedTo: direct
@@ -267,7 +268,7 @@ export function apply(context: Context, config: Config): void {
       session?.isDirect && /^\d{1,32}$/.test(identity.userId)
         ? { kind: 'user', id: identity.userId }
         : guildId && enabledGroups.has(guildId)
-          ? { kind: 'group', id: guildId }
+          ? { kind: 'group', id: guildId, userId: identity.userId }
           : undefined;
     try {
       const run = () =>

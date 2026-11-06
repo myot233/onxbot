@@ -11,6 +11,10 @@ import type { ModelProvider, ModelTrace } from './types.js';
 
 const toolErrorPartSchema = z.object({ type: z.literal('tool-error') });
 const echoContentSchema = z.string().catch('');
+const assistantPartsSchema = z.looseObject({
+  role: z.literal('assistant'),
+  content: z.array(z.looseObject({ type: z.string() })),
+});
 const deepSeekUsageResponseSchema = z.object({
   usage: z.object({
     prompt_cache_hit_tokens: z.number(),
@@ -30,11 +34,17 @@ export type ProviderConfig =
       apiKey: string;
       model: string;
       timeoutMs: number;
+      deepSeekReasoningEffort?: 'low' | 'high' | 'max';
     };
 
 export function createSdkModelProvider(
   model: LanguageModel,
-  options: { timeoutMs?: number; deepSeek?: boolean; trace?: ModelTrace } = {},
+  options: {
+    timeoutMs?: number;
+    deepSeek?: boolean;
+    reasoningEffort?: 'low' | 'high' | 'max';
+    trace?: ModelTrace;
+  } = {},
 ): ModelProvider {
   return {
     async generate({ messages, tools, maxSteps = 1, prepareMessages }) {
@@ -57,7 +67,19 @@ export function createSdkModelProvider(
                 data: {
                   modelId,
                   instructions,
-                  messages,
+                  messages: messages.map((message) => {
+                    const parsed = assistantPartsSchema.safeParse(message);
+                    if (!parsed.success) return message;
+                    return {
+                      ...parsed.data,
+                      content: parsed.data.content.map((part) =>
+                        part.type === 'reasoning' ||
+                        part.type === 'reasoning-file'
+                          ? { type: part.type, redacted: true }
+                          : part,
+                      ),
+                    };
+                  }),
                   tools: tools?.map(({ name }) => name),
                 },
               });
@@ -99,11 +121,19 @@ export function createSdkModelProvider(
           ...(options.timeoutMs !== undefined && {
             timeout: { stepMs: options.timeoutMs },
           }),
-          // DeepSeek thinking mode requires reasoning_content across tool steps.
-          ...(options.deepSeek &&
-            tools && {
-              providerOptions: { onxbot: { thinking: { type: 'disabled' } } },
-            }),
+          ...(options.reasoningEffort
+            ? {
+                providerOptions: {
+                  onxbot: {
+                    thinking: { type: 'enabled' },
+                    reasoningEffort: options.reasoningEffort,
+                  },
+                },
+              }
+            : options.deepSeek &&
+              tools && {
+                providerOptions: { onxbot: { thinking: { type: 'disabled' } } },
+              }),
           prepareStep: ({ stepNumber, responseMessages, steps }) => {
             if (steps.at(-1)?.content.some(isToolErrorPart))
               throw new Error('Model tool execution failed.');
@@ -179,6 +209,9 @@ export function createModelProvider(
   return createSdkModelProvider(provider(config.model), {
     timeoutMs: config.timeoutMs,
     deepSeek: new URL(config.baseUrl).hostname === 'api.deepseek.com',
+    ...(config.deepSeekReasoningEffort && {
+      reasoningEffort: config.deepSeekReasoningEffort,
+    }),
     ...(trace && { trace }),
   });
 }

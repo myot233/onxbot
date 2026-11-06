@@ -13,12 +13,12 @@ import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { defineTool, type Tool } from './turn/tools.js';
 
-export interface MemoryScope {
-  kind: 'group' | 'user';
-  id: string;
-}
+export type MemoryScope =
+  | { kind: 'group'; id: string; userId?: string }
+  | { kind: 'user'; id: string };
 
 const maxFileBytes = 8_192;
+const scopeId = z.string().regex(/^\d{1,32}$/);
 const filename = z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,59}\.md$/u);
 
 function hasCode(error: unknown, code: string): boolean {
@@ -40,16 +40,26 @@ export class MarkdownMemory {
   }
 
   tools(scope: MemoryScope): readonly Tool[] {
-    if (!/^\d{1,32}$/.test(scope.id))
-      throw new Error('Invalid memory scope ID.');
-    const parts = [scope.kind, scope.id] as const;
-    const folder = join(this.root, ...parts);
+    const id = scopeId.parse(scope.id);
+    const baseParts = [scope.kind, id];
+    const memberId =
+      scope.kind === 'group' ? scopeId.safeParse(scope.userId).data : undefined;
+    const memberParts = memberId ? ['user', memberId, 'group', id] : undefined;
+    const target = (
+      memberParts ? z.enum(['group', 'user']) : z.literal(scope.kind)
+    ).optional();
+    const directory = (requested?: 'group' | 'user') => {
+      const parts =
+        requested === 'user' && memberParts ? memberParts : baseParts;
+      return { parts, folder: join(this.root, ...parts) };
+    };
     return [
       defineTool({
         name: 'list_memory',
         description: '列出当前会话范围内的 Markdown 记忆文件名。',
-        input: z.object({}),
-        execute: async () => {
+        input: z.object({ scope: target }),
+        execute: async ({ scope: requested }) => {
+          const { parts, folder } = directory(requested);
           const names = new Set<string>();
           try {
             await this.checkFolder(parts, false);
@@ -63,8 +73,9 @@ export class MarkdownMemory {
             if (!hasCode(error, 'ENOENT')) return '记忆目录不可读。';
           }
           for (const path of this.pending.keys()) {
-            if (path.startsWith(`${folder}${sep}`))
-              names.add(path.slice(folder.length + 1));
+            if (!path.startsWith(`${folder}${sep}`)) continue;
+            const name = path.slice(folder.length + 1);
+            if (filename.safeParse(name).success) names.add(name);
           }
           return JSON.stringify([...names].sort());
         },
@@ -72,8 +83,9 @@ export class MarkdownMemory {
       defineTool({
         name: 'read_memory',
         description: '按文件名读取当前会话范围内的一份 Markdown 记忆。',
-        input: z.object({ filename }),
-        execute: async ({ filename: name }) => {
+        input: z.object({ scope: target, filename }),
+        execute: async ({ scope: requested, filename: name }) => {
+          const { parts, folder } = directory(requested);
           const path = join(folder, name);
           const staged = this.pending.get(path);
           if (staged) return staged.markdown;
@@ -103,10 +115,12 @@ export class MarkdownMemory {
         description:
           '按主题新建或替换一份 Markdown 记忆。更新已有文件前先读取，并保留仍有效的内容。写入在后台完成。',
         input: z.object({
+          scope: target,
           filename,
           content: z.string().trim().min(1).max(8_192),
         }),
-        execute: async ({ filename: name, content }) => {
+        execute: async ({ scope: requested, filename: name, content }) => {
+          const { parts, folder } = directory(requested);
           const markdown = `${content}\n`;
           if (Buffer.byteLength(markdown) > maxFileBytes)
             return '文件过大，请精简或分成多份。';

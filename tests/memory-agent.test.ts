@@ -6,6 +6,7 @@ import {
   ConversationAgent,
   GroupChat,
   MarkdownMemory,
+  type MemoryScope,
   TurnRunner,
 } from '../packages/core/src/index.js';
 import type { ModelMessage } from '../packages/model/src/index.js';
@@ -57,12 +58,12 @@ const prompt = {
   ],
 };
 
-function call(name: string, input: object = {}) {
+function call(name: string, input: object = {}, id = name) {
   return sdkResult(
     [
       {
         type: 'tool-call',
-        toolCallId: name,
+        toolCallId: id,
         toolName: name,
         input: JSON.stringify(input),
       },
@@ -84,7 +85,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
     await blocked;
     await fs.writeFile(...args);
   });
-  const send = vi.fn(async (messages: readonly string[]) => messages);
+  const send = vi.fn(async (_text: string) => true);
   let step = 0;
   const agent = new ConversationAgent(
     new TurnRunner(
@@ -97,7 +98,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
             });
           case 1:
             expect(JSON.stringify(messages.at(-1))).toContain('后台写入队列');
-            return call('send_message', { messages: ['周二见。'] });
+            return call('send_message', { text: '周二见。' });
           default:
             return sdkResult([]);
         }
@@ -109,7 +110,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
   try {
     const turn = agent.run(prompt, { kind: 'group', id: '42' }, send);
     await vi.waitFor(() =>
-      expect(send).toHaveBeenCalledExactlyOnceWith(['周二见。']),
+      expect(send).toHaveBeenCalledExactlyOnceWith('周二见。'),
     );
     await expect(
       readFile(join(root, 'group/42/会议.md'), 'utf8'),
@@ -167,13 +168,25 @@ it('sends each short group reply separately and in order', async () => {
     index === 0 ? first : true,
   );
   let step = 0;
-  const model = sdkModel(() =>
-    step++ === 0
-      ? call('send_message', {
-          messages: ['可以。', '周二见。', '带上会议记录。'],
-        })
-      : sdkResult([]),
-  );
+  const model = sdkModel(({ prompt }) => {
+    switch (step++) {
+      case 0:
+        return sdkResult(
+          [
+            ...call('send_message', { text: '可以。' }, 'send-1').content,
+            ...call('send_message', { text: '周二见。' }, 'send-2').content,
+          ],
+          'tool-calls',
+        );
+      case 1:
+        expect(JSON.stringify(prompt.at(-1))).toContain('消息已发出');
+        return call('list_memory');
+      case 2:
+        return call('send_message', { text: '带上会议记录。' }, 'send-3');
+      default:
+        return sdkResult([]);
+    }
+  });
   const group = new GroupChat(model, {
     systemPrompt: 'Be concise.',
     spontaneous: false,
@@ -220,7 +233,7 @@ it('starts a scheduled topic from restored context without receiving live messag
       expect(JSON.stringify(prompt)).toContain('scheduled_topic');
       expect(JSON.stringify(prompt)).toContain('周二');
       return call('send_message', {
-        messages: ['说到周二，有人想一起喝咖啡吗？'],
+        text: '说到周二，有人想一起喝咖啡吗？',
       });
     }
     return sdkResult([]);
@@ -241,6 +254,93 @@ it('starts a scheduled topic from restored context without receiving live messag
     expect(send).toHaveBeenCalledExactlyOnceWith(
       '说到周二，有人想一起喝咖啡吗？',
       0,
+    );
+  } finally {
+    await memory.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('saves group facts and member preferences silently in isolated scopes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
+  const errors = vi.fn();
+  const memory = new MarkdownMemory(root, errors);
+  const send = vi.fn(async () => true);
+  const model = sdkModel(({ prompt }) => {
+    if (prompt.at(-1)?.role === 'tool') return sdkResult([]);
+    return sdkResult(
+      [
+        ...call(
+          'write_memory',
+          { scope: 'group', filename: '活动.md', content: '每周二读书会。' },
+          'group-write',
+        ).content,
+        ...call(
+          'write_memory',
+          { scope: 'user', filename: '偏好.md', content: '喜欢科幻小说。' },
+          'member-write',
+        ).content,
+      ],
+      'tool-calls',
+    );
+  });
+  const group = new GroupChat(model, {
+    systemPrompt: 'Be concise.',
+    spontaneous: false,
+    agent: new ConversationAgent(new TurnRunner(model), memory),
+  });
+  try {
+    await group.receive(
+      {
+        roomId: '42',
+        userId: '7',
+        addressedTo: 'bot',
+        speaker: 'A',
+        text: '每周二读书会，我喜欢科幻小说。',
+      },
+      send,
+    );
+    expect(send).not.toHaveBeenCalled();
+
+    async function list(scope: MemoryScope, requested: 'group' | 'user') {
+      const reader = new ConversationAgent(
+        new TurnRunner(
+          sdkModel(({ prompt }) => {
+            const result = prompt.at(-1);
+            if (result?.role !== 'tool')
+              return call('list_memory', { scope: requested });
+            const part = result.content[0];
+            if (part?.type !== 'tool-result' || part.output.type !== 'text')
+              throw new Error('Expected memory filenames.');
+            return sdkResult([{ type: 'text', text: part.output.value }]);
+          }),
+        ),
+        memory,
+      );
+      return (await reader.run(prompt, scope)).reply;
+    }
+
+    expect(await list({ kind: 'group', id: '42', userId: '7' }, 'user')).toBe(
+      '["偏好.md"]',
+    );
+    expect(await list({ kind: 'group', id: '42', userId: '8' }, 'user')).toBe(
+      '[]',
+    );
+    expect(await list({ kind: 'group', id: '43', userId: '7' }, 'user')).toBe(
+      '[]',
+    );
+    expect(await list({ kind: 'user', id: '7' }, 'user')).toBe('[]');
+    expect(await list({ kind: 'group', id: '42' }, 'group')).toBe(
+      '["活动.md"]',
+    );
+
+    await memory.close();
+    expect(errors).not.toHaveBeenCalled();
+    expect(await readFile(join(root, 'group/42/活动.md'), 'utf8')).toBe(
+      '每周二读书会。\n',
+    );
+    expect(await readFile(join(root, 'user/7/group/42/偏好.md'), 'utf8')).toBe(
+      '喜欢科幻小说。\n',
     );
   } finally {
     await memory.close();
