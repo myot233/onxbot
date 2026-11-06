@@ -12,6 +12,7 @@ import {
   type GroupTopicStore,
   type MemoryScope,
   prepareGroupLine,
+  type Tool,
 } from '@onxbot/core';
 import type { Context, Session } from 'koishi';
 
@@ -21,6 +22,13 @@ const { Argv, h } = createRequire(import.meta.url)(
 
 export const name = 'onxbot-chat';
 
+export interface GroupToolTarget {
+  groupId: string;
+  userId?: string;
+  messageId?: string;
+  quoteId?: string;
+}
+
 export interface Config {
   service: ChatService;
   observe?: <T>(session: string, work: () => Promise<T>) => Promise<T>;
@@ -28,6 +36,10 @@ export interface Config {
     ids: readonly string[];
     chat: GroupChat;
     topics?: { ids: readonly string[]; store: GroupTopicStore };
+    tools?: {
+      ids: readonly string[];
+      create(bot: Session['bot'], target: GroupToolTarget): readonly Tool[];
+    };
   };
   feedback?: { ids: readonly string[]; store: GroupFeedback };
 }
@@ -55,7 +67,8 @@ export function apply(context: Context, config: Config): void {
   const enabledGroups = new Set(config.group?.ids);
   const feedbackGroups = new Set(config.feedback?.ids);
   if (config.group) {
-    const { chat, topics } = config.group;
+    const { chat, topics, tools } = config.group;
+    const toolGroups = new Set(tools?.ids);
     const topicIds = topics?.ids.filter((id) => enabledGroups.has(id)) ?? [];
     const topicGroups = new Set(topicIds);
     const recordTopicLine = async (
@@ -112,6 +125,9 @@ export function apply(context: Context, config: Config): void {
                     );
                     return true;
                   },
+                  tools && toolGroups.has(topic.groupId)
+                    ? () => tools.create(bot, { groupId: topic.groupId })
+                    : undefined,
                 );
               if (config.observe)
                 await config.observe(
@@ -154,6 +170,9 @@ export function apply(context: Context, config: Config): void {
           (element) => String(element.attrs.id) === session.selfId,
         ) || quotedUser === session.selfId;
       const text = plainText(elements);
+      const groupTools = toolGroups.has(guildId) ? tools : undefined;
+      const forwarded =
+        groupTools && elements.some((element) => element.type === 'forward');
       const feedback = feedbackGroups.has(guildId)
         ? config.feedback?.store
         : undefined;
@@ -176,14 +195,21 @@ export function apply(context: Context, config: Config): void {
         }
         return;
       }
-      if (text.startsWith('/') || (!text && !direct)) return;
-      const quote = plainText(session.quote?.elements ?? []);
+      if (text.startsWith('/') || (!text && !direct && !forwarded)) return;
+      const quoteElements = session.quote?.elements ?? [];
+      const quote =
+        plainText(quoteElements) ||
+        (groupTools &&
+        quoteElements.some((element) => element.type === 'forward')
+          ? '[Forwarded QQ message]'
+          : '');
       const messageId = session.messageId;
+      const quoteId = session.quote?.messageId;
       const groupMessage: GroupMessage = {
         roomId: guildId,
         userId,
         speaker: session.username || userId,
-        text: text || '（叫了你）',
+        text: text || (forwarded ? '[Forwarded QQ message]' : '（叫了你）'),
         addressedTo: direct
           ? 'bot'
           : mentions.length || session.quote
@@ -235,6 +261,14 @@ export function apply(context: Context, config: Config): void {
                     );
                 }
               : undefined,
+            groupTools &&
+              (() =>
+                groupTools.create(session.bot, {
+                  groupId: guildId,
+                  userId,
+                  ...(messageId && { messageId }),
+                  ...(quoteId && { quoteId }),
+                })),
           );
         if (config.observe)
           await config.observe(
