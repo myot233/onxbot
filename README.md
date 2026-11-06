@@ -145,3 +145,24 @@ TEST_DATABASE_URL=postgresql://onxbot:onxbot_dev@127.0.0.1:5432/onxbot pnpm test
 按[官方依赖调用方式](https://koishi.chat/zh-CN/manual/starter/direct)手动创建 `Context`，不使用 Koishi CLI 启动，不启用 console、sandbox、插件市场界面或 Koishi 数据库驱动。依赖 `koishi` 以满足 OneBot 的 peer dependency；包本身会传递安装 loader 等依赖，但应用不启用对应服务。
 
 Koishi 4.18.11 的 ESM loader 入口存在 CommonJS 默认导入兼容问题，因此两个消息接入边界通过 Node.js `createRequire()` 使用官方 CommonJS 入口；项目其余代码保持 ESM。此兼容处理已有完整 OneBot 测试覆盖。
+
+### GHCR 自动部署
+
+`main` 的 CI 通过后会发布 `ghcr.io/myot233/onxbot:sha-<commit>`，并将通过检查的当前主分支镜像标记为 `:main`。GHCR 首次发布的包默认私有。服务器可以匿名拉取公开包，私有包需在部署用户的 Docker 会话中配置 GHCR 读取凭据。
+
+将 `deploy/` 放到服务器的 `~/services/onxbot/`，使用现有的生产 `compose.yaml`、`compose.override.yaml` 和 `.env`。先确认首个 GHCR 镜像包含线上使用的功能，再安装并启用定时任务。
+
+```sh
+cd ~/services/onxbot
+install -d ~/.config/systemd/user
+install -m 0644 deploy/onxbot-image-update.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now onxbot-image-update.timer
+```
+
+定时任务每五分钟拉取镜像，发现变化时先用候选镜像运行数据库迁移，再重建 Bot。服务单元以本机观测面板为就绪探针。候选镜像启动失败时会尝试恢复上一个镜像，数据库迁移仍保留。后续检查会跳过这个失败的镜像，直到 GHCR 发布新镜像，或管理员删除服务器部署目录中的 `.ghcr-rejected-image`。手动操作 Bot 时使用相同的 Compose 文件组合。
+
+```sh
+docker compose -f compose.yaml -f compose.override.yaml -f deploy/compose.ghcr.yaml ps
+journalctl --user -u onxbot-image-update.service -n 30
+```

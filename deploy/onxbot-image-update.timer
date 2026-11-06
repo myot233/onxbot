@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for new onxbot images
+
+[Timer]
+OnStartupSec=1min
+OnUnitInactiveSec=5min
+Unit=onxbot-image-update.service
+
+[Install]
+WantedBy=timers.target
