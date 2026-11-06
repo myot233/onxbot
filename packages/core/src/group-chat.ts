@@ -4,7 +4,7 @@ import type { ConversationAgent } from './turn/agent.js';
 import type { Tool } from './turn/tools.js';
 
 const historyLimit = 16;
-const decisionIntervalMs = 45_000;
+const decisionIntervalMs = 3 * 60_000;
 const silence = '[[SKIP]]';
 type GroupSend = (text: string, index: number) => Promise<boolean>;
 
