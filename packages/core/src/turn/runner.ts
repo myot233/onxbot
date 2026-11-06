@@ -1,5 +1,6 @@
 import {
   type ModelProvider,
+  type ModelResponse,
   replaceableAssistantMessageSchema,
   type TurnMessage,
 } from '@onxbot/model';
@@ -36,7 +37,7 @@ export class TurnRunner {
 
   async run(
     context: PreparedContext,
-    selectReply?: () => string | undefined,
+    selectReply?: (result: ModelResponse) => string | undefined,
   ): Promise<TurnResult> {
     const tools = this.options.tools;
     const result = await this.model.generate({
@@ -49,7 +50,7 @@ export class TurnRunner {
       maxSteps: this.options.maxModelCalls ?? 8,
       prepareMessages: (output) => context.messages(output),
     });
-    const selected = selectReply?.();
+    const selected = selectReply?.(result);
     const reply = (selected ?? result.text).trim();
     if (!reply) {
       if (selected === '') return { reply, messages: result.messages };

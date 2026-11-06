@@ -34,12 +34,16 @@ const environment = z.object({
   OPENAI_API_KEY: z.string().trim().default(''),
   OPENAI_MODEL: nonempty.default('gpt-4.1-mini'),
   DEEPSEEK_REASONING_EFFORT: z.enum(['low', 'high', 'max']).optional(),
-  CHAT_SYSTEM_PROMPT: nonempty.default('你是一个友善、简洁的中文对话助手。'),
+  CHAT_WEB_RESEARCH: z.enum(['true', 'false']).default('false'),
+  CHAT_SYSTEM_PROMPT: nonempty.default(
+    'You MUST respond in friendly, concise conversational Chinese.',
+  ),
   CHAT_GROUP_SYSTEM_PROMPT: z.string().trim().default(''),
   CHAT_MEMORY_DIR: nonempty.default('memory'),
   CHAT_HISTORY_TURNS: z.coerce.number().int().min(0).max(100).default(10),
   CHAT_GROUP_IDS: groupIds,
   CHAT_TOPIC_GROUP_IDS: groupIds,
+  CHAT_QQ_TOOL_GROUP_IDS: groupIds,
   CHAT_FEEDBACK_GROUP_IDS: groupIds,
   CHAT_MAX_INPUT_CHARS: z.coerce
     .number()
@@ -56,6 +60,7 @@ const environment = z.object({
 });
 
 export interface BotConfig {
+  webResearch: boolean;
   observe?: { host: string; port: number; password: string };
   databaseUrl: string;
   onebot: {
@@ -69,6 +74,7 @@ export interface BotConfig {
   chat: ChatOptions;
   groupIds: readonly string[];
   topicGroupIds: readonly string[];
+  qqToolGroupIds: readonly string[];
   feedbackGroupIds: readonly string[];
   groupSystemPrompt: string;
   memoryDir: string;
@@ -106,7 +112,17 @@ export function loadConfig(
       };
     })
     .exhaustive();
+  const webResearch = env.CHAT_WEB_RESEARCH === 'true';
+  if (
+    webResearch &&
+    (provider.type !== 'openai' ||
+      new URL(provider.baseUrl).origin !== 'https://api.deepseek.com')
+  )
+    throw new Error(
+      'CHAT_WEB_RESEARCH requires the official DeepSeek HTTPS endpoint.',
+    );
   return {
+    webResearch,
     ...(env.OBSERVE_PORT &&
       env.OBSERVE_PASSWORD && {
         observe: {
@@ -126,6 +142,7 @@ export function loadConfig(
     provider,
     groupIds: env.CHAT_GROUP_IDS,
     topicGroupIds: env.CHAT_TOPIC_GROUP_IDS,
+    qqToolGroupIds: env.CHAT_QQ_TOOL_GROUP_IDS,
     feedbackGroupIds: env.CHAT_FEEDBACK_GROUP_IDS,
     groupSystemPrompt: env.CHAT_GROUP_SYSTEM_PROMPT || env.CHAT_SYSTEM_PROMPT,
     memoryDir: env.CHAT_MEMORY_DIR,

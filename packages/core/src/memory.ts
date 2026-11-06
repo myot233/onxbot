@@ -56,7 +56,8 @@ export class MarkdownMemory {
     return [
       defineTool({
         name: 'list_memory',
-        description: '列出当前会话范围内的 Markdown 记忆文件名。',
+        description:
+          'List Markdown memory filenames within the selected scope.',
         input: z.object({ scope: target }),
         execute: async ({ scope: requested }) => {
           const { parts, folder } = directory(requested);
@@ -82,7 +83,8 @@ export class MarkdownMemory {
       }),
       defineTool({
         name: 'read_memory',
-        description: '按文件名读取当前会话范围内的一份 Markdown 记忆。',
+        description:
+          'Read a Markdown memory file by name within the selected scope.',
         input: z.object({ scope: target, filename }),
         execute: async ({ scope: requested, filename: name }) => {
           const { parts, folder } = directory(requested);
@@ -113,7 +115,7 @@ export class MarkdownMemory {
       defineTool({
         name: 'write_memory',
         description:
-          '按主题新建或替换一份 Markdown 记忆。更新已有文件前先读取，并保留仍有效的内容。写入在后台完成。',
+          'Create or replace a Markdown memory file by topic. You MUST read an existing file before updating it and retain facts that still apply. Writes run in the background.',
         input: z.object({
           scope: target,
           filename,

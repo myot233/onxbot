@@ -7,9 +7,13 @@ import type {
   GroupTopicStore,
 } from '@onxbot/core';
 import * as chatPlugin from '@onxbot/koishi-plugin-chat';
-import type { Context as KoishiContext } from 'koishi';
+import type {
+  Context as KoishiContext,
+  Session as KoishiSession,
+} from 'koishi';
 import { OneBotBot } from 'koishi-plugin-adapter-onebot';
 import type { BotConfig } from './config.js';
+import { createQqTools } from './qq-tools.js';
 
 // Koishi 4's ESM loader imports a CommonJS default incorrectly; use its CJS entry.
 const { Context } = createRequire(import.meta.url)(
@@ -46,6 +50,27 @@ export function createBotRuntime(
           ...(topics && {
             topics: { ids: config.topicGroupIds, store: topics },
           }),
+          ...(config.provider.type === 'openai' &&
+            config.qqToolGroupIds.length && {
+              tools: {
+                ids: config.qqToolGroupIds,
+                create(
+                  bot: KoishiSession['bot'],
+                  target: chatPlugin.GroupToolTarget,
+                ) {
+                  if (!(bot instanceof OneBotBot)) return [];
+                  return createQqTools(async (action, params) => {
+                    const response = await bot.internal._request?.(
+                      action,
+                      params,
+                    );
+                    if (response?.retcode !== 0)
+                      throw new Error('NapCat action failed.');
+                    return response.data as unknown;
+                  }, target);
+                },
+              },
+            }),
         },
       }),
   });

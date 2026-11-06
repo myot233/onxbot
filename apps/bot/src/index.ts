@@ -20,6 +20,7 @@ import { loadConfig } from './config.js';
 import { createObservationPanel } from './observe/panel.js';
 import { TraceBuffer } from './observe/traces.js';
 import { createBotRuntime } from './runtime.js';
+import { createWebResearchTools } from './web-research.js';
 
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -37,7 +38,13 @@ async function main(): Promise<void> {
   const agent =
     config.provider.type === 'echo'
       ? undefined
-      : new ConversationAgent(runner, memory);
+      : new ConversationAgent(
+          runner,
+          memory,
+          config.webResearch
+            ? createWebResearchTools(config.provider.apiKey)
+            : undefined,
+        );
   const service = new ChatService({
     conversations: new ConversationService(createConversationStore(db)),
     context: new ContextBuilder(config.chat),
@@ -52,8 +59,10 @@ async function main(): Promise<void> {
           createHash('sha256')
             .update(
               JSON.stringify([
-                'group-agent-v6',
+                'group-agent-v10',
                 config.provider.model,
+                config.webResearch,
+                config.qqToolGroupIds,
                 config.groupSystemPrompt,
               ]),
             )
