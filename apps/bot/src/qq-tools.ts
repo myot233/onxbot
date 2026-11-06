@@ -233,7 +233,7 @@ export function createQqTools(
           defineTool({
             name: 'qq_react',
             description:
-              'Add one native QQ emoji reaction to the triggering message. Use it when a reaction alone fits.',
+              'Add one native QQ emoji reaction to the triggering message. You MUST prefer this tool for a lightweight acknowledgement when the reaction conveys the whole response.',
             input: z.object({
               reaction: z.enum(
                 Object.keys(reactionIds) as (keyof typeof reactionIds)[],
@@ -253,7 +253,7 @@ export function createQqTools(
           defineTool({
             name: 'qq_poke',
             description:
-              'Send one QQ poke to the triggering member. You MUST use it only if that member explicitly asks for a poke.',
+              'Send one QQ poke to the triggering member. You MUST use it only when they explicitly ask for a poke or directly invite a playful interaction with the bot.',
             input: z.object({}),
             execute: async () => interact('group_poke', { group_id, user_id }),
           }),
