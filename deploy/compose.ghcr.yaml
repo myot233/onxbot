@@ -1,0 +1,7 @@
+services:
+  migrate:
+    image: onxbot-local:ghcr-deployed
+    pull_policy: never
+  bot:
+    image: onxbot-local:ghcr-deployed
+    pull_policy: never

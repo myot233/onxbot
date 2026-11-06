@@ -1,0 +1,7 @@
+[Unit]
+Description=Update onxbot from GitHub Container Registry
+
+[Service]
+Type=oneshot
+Environment=ONXBOT_PROBE_URL=http://127.0.0.1:8787/
+ExecStart=%h/services/onxbot/deploy/update-image.sh
