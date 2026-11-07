@@ -16,7 +16,7 @@
     "check": "biome check .",
     "format": "biome check --write .",
     "test": "vitest run --exclude 'tests/*.integration.test.ts'",
-    "test:integration": "vitest run tests/*.integration.test.ts",
+    "test:integration": "vitest run --no-file-parallelism tests/*.integration.test.ts",
     "db:up": "docker compose up -d --wait postgres",
     "db:down": "docker compose down",
     "db:migrate": "tsx --conditions=development --env-file=.env apps/bot/src/migrate.ts"

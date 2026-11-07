@@ -57,7 +57,7 @@ pnpm build
 TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/test_database pnpm test:integration
 ```
 
-Integration tests create isolated schemas in the supplied PostgreSQL database. Use a disposable local test database. Add regression coverage for changed behavior that existing tests miss, especially timestamps, pending writes, tool scopes, claims, and checkpoints.
+Integration tests create isolated schemas in the supplied PostgreSQL database. Use a disposable local test database. Keep integration test files sequential because database-wide migration introspection can race with another file dropping its schema. Add regression coverage for changed behavior that existing tests miss, especially timestamps, pending writes, tool scopes, claims, and checkpoints.
 
 Keep formatting changes scoped to touched files. Do not modify generated `dist` output.
 
