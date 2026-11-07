@@ -1,8 +1,7 @@
-/** QQ conversation times use modern Asia/Shanghai time (UTC+08:00). */
+import { TZDate } from '@date-fns/tz';
+
+/** Render an instant in the conversation's IANA time zone. */
 export function chatTimestamp(value: string | number = Date.now()): string {
-  const milliseconds = new Date(value).getTime();
-  if (!Number.isFinite(milliseconds)) return 'unknown';
-  return new Date(milliseconds + 8 * 60 * 60_000)
-    .toISOString()
-    .replace('Z', '+08:00');
+  const date = new TZDate(new Date(value), 'Asia/Shanghai');
+  return Number.isFinite(date.getTime()) ? date.toISOString() : 'unknown';
 }

@@ -16,9 +16,11 @@
     }
   },
   "dependencies": {
+    "@date-fns/tz": "^1.5.0",
     "@onxbot/model": "workspace:*",
     "ai": "^7.0.163",
     "lodash-es": "^4.18.1",
+    "p-queue": "^10.0.0",
     "ts-pattern": "^5.9.2",
     "zod": "^4.6.7"
   },

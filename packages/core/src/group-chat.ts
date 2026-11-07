@@ -42,6 +42,14 @@ export function prepareGroupLine(message: GroupMessage): GroupLine {
   };
 }
 
+/** Keep stored instants unchanged and normalize time only at the model seam. */
+export function renderGroupLine({ sentAt, ...line }: GroupLine): GroupLine {
+  return {
+    ...line,
+    ...(sentAt && { sentAt: chatTimestamp(sentAt) }),
+  };
+}
+
 export function appendGroupLine(lines: GroupLine[], line: GroupLine): void {
   lines.push(line);
   // Rotate in batches so requests can share a prefix between rotations.
@@ -186,18 +194,13 @@ export class GroupChat {
                 : []),
             ].join('\n'),
           },
-          ...decision.context.flatMap(
-            ({ text, sentAt, ...metadata }): ModelMessage[] => [
-              {
-                role: 'user',
-                content: JSON.stringify({
-                  ...metadata,
-                  ...(sentAt && { sentAt: chatTimestamp(sentAt) }),
-                }),
-              },
+          ...decision.context.flatMap((line): ModelMessage[] => {
+            const { text, ...metadata } = renderGroupLine(line);
+            return [
+              { role: 'user', content: JSON.stringify(metadata) },
               { role: 'user', content: text },
-            ],
-          ),
+            ];
+          }),
         ];
         if (trigger === 'topic')
           messages.push({
