@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { createServer } from 'node:http';
+import { escape as escapeHtml, uniq } from 'lodash-es';
 import type { TraceBuffer } from './traces.js';
 
 const css = `
@@ -15,21 +16,13 @@ summary { cursor: pointer; }
 pre { padding: 1rem; background: color-mix(in srgb, CanvasText 6%, Canvas); white-space: pre-wrap; overflow-wrap: anywhere; }
 `;
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;');
-}
-
 function render(
   buffer: TraceBuffer,
   session: string | null,
   selected: string | null,
 ): string {
   const traces = buffer.list();
-  const sessions = [...new Set(traces.map((trace) => trace.session))];
+  const sessions = uniq(traces.map((trace) => trace.session));
   const matching = traces.filter(
     (trace) => !session || trace.session === session,
   );

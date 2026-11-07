@@ -164,6 +164,54 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
   }
 });
 
+it('reports failed writes at flush and continues processing queued notes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
+  const errors = vi.fn();
+  const memory = new MarkdownMemory(root, errors);
+  const failure = new Error('Disk write failed');
+  vi.mocked(writeFile).mockRejectedValueOnce(failure);
+  let step = 0;
+  const agent = new ConversationAgent(
+    new TurnRunner(
+      sdkModel(() => {
+        switch (step++) {
+          case 0:
+            return call('write_memory', {
+              filename: '失败.md',
+              content: '未保存',
+            });
+          case 1:
+            return call('write_memory', {
+              filename: '活动.md',
+              content: '周二见',
+            });
+          default:
+            return sdkResult([{ type: 'text', text: '已记录' }]);
+        }
+      }),
+    ),
+    memory,
+  );
+
+  try {
+    await agent.run(prompt, { kind: 'group', id: '42' });
+    await expect(memory.flush()).rejects.toThrow('memory write failed');
+    expect(errors).toHaveBeenCalledExactlyOnceWith(failure);
+    expect(await readFile(join(root, 'group/42/活动.md'), 'utf8')).toContain(
+      '周二见',
+    );
+    await expect(
+      readFile(join(root, 'group/42/失败.md')),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(memory.flush()).resolves.toBeUndefined();
+  } finally {
+    await memory.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it('sends each short group reply separately and in order', async () => {
   const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
   const memory = new MarkdownMemory(root, vi.fn());

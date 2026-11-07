@@ -10,6 +10,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import PQueue from 'p-queue';
 import { z } from 'zod';
 import { chatTimestamp } from './time.js';
 import { defineTool, type Tool } from './turn/tools.js';
@@ -32,8 +33,7 @@ export class MarkdownMemory {
   private readonly root: string;
   private readonly pending = new Map<string, { markdown: string }>();
   private readonly versions = new Map<string, number>();
-  private writes = Promise.resolve();
-  private queued = 0;
+  private readonly writes = new PQueue({ concurrency: 1 });
   private closed = false;
   private failedWrites = 0;
 
@@ -172,7 +172,7 @@ export class MarkdownMemory {
           const markdown = `${body}\n\nRecorded at: ${chatTimestamp()}\n`;
           if (Buffer.byteLength(markdown) > maxFileBytes)
             return '文件过大，请精简或分成多份。';
-          if (this.closed || this.queued >= 128)
+          if (this.closed || this.writes.size + this.writes.pending >= 128)
             return '记忆写入队列暂不可用。';
           this.enqueue(parts, path, markdown);
           readVersions.set(path, this.versions.get(path) ?? 0);
@@ -184,11 +184,11 @@ export class MarkdownMemory {
 
   async close(): Promise<void> {
     this.closed = true;
-    await this.writes;
+    await this.writes.onIdle();
   }
 
   async flush(): Promise<void> {
-    await this.writes;
+    await this.writes.onIdle();
     if (this.failedWrites) {
       this.failedWrites = 0;
       throw new Error('A memory write failed before the review checkpoint.');
@@ -203,27 +203,27 @@ export class MarkdownMemory {
     const entry = { markdown };
     this.versions.set(path, (this.versions.get(path) ?? 0) + 1);
     this.pending.set(path, entry);
-    this.queued += 1;
-    this.writes = this.writes
-      .then(async () => {
-        await this.checkFolder(parts, true);
-        const temporary = `${path}.${randomUUID()}.tmp`;
+    void this.writes
+      .add(async () => {
         try {
-          await writeFile(temporary, markdown, { flag: 'wx', mode: 0o600 });
-          await rename(temporary, path);
+          await this.checkFolder(parts, true);
+          const temporary = `${path}.${randomUUID()}.tmp`;
+          try {
+            await writeFile(temporary, markdown, { flag: 'wx', mode: 0o600 });
+            await rename(temporary, path);
+          } catch (error) {
+            await unlink(temporary).catch(() => {});
+            throw error;
+          }
         } catch (error) {
-          await unlink(temporary).catch(() => {});
-          throw error;
+          this.failedWrites += 1;
+          this.onError(error);
+        } finally {
+          if (this.pending.get(path) === entry) this.pending.delete(path);
         }
       })
-      .catch((error: unknown) => {
-        this.failedWrites += 1;
-        this.onError(error);
-      })
-      .finally(() => {
-        this.queued -= 1;
-        if (this.pending.get(path) === entry) this.pending.delete(path);
-      });
+      // Task failures are reported before the queue becomes idle.
+      .catch(() => {});
   }
 
   private async checkFolder(

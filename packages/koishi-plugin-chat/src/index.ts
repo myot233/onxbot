@@ -64,6 +64,15 @@ function identityFromSession(
   };
 }
 
+function sessionTimestamp(session: Session | undefined): string {
+  const timestamp = session?.timestamp;
+  return new Date(
+    timestamp && Number.isFinite(timestamp) && timestamp > 0
+      ? timestamp
+      : Date.now(),
+  ).toISOString();
+}
+
 export function apply(context: Context, config: Config): void {
   const logger = context.logger(name);
   const enabledGroups = new Set(config.group?.ids);
@@ -219,11 +228,7 @@ export function apply(context: Context, config: Config): void {
         roomId: guildId,
         userId,
         speaker: session.username || userId,
-        sentAt: new Date(
-          Number.isFinite(session.timestamp) && session.timestamp > 0
-            ? session.timestamp
-            : Date.now(),
-        ).toISOString(),
+        sentAt: sessionTimestamp(session),
         text: text || (forwarded ? '[Forwarded QQ message]' : '（叫了你）'),
         addressedTo: direct
           ? 'bot'
@@ -330,13 +335,7 @@ export function apply(context: Context, config: Config): void {
           identity,
           ...(request.type === 'chat' && scope && { memoryScope: scope }),
           ...(request.type === 'chat' && {
-            sentAt: new Date(
-              session &&
-                Number.isFinite(session.timestamp) &&
-                session.timestamp > 0
-                ? session.timestamp
-                : Date.now(),
-            ).toISOString(),
+            sentAt: sessionTimestamp(session),
           }),
         });
       const { platform, botId, channelId, userId } = identity;
@@ -363,7 +362,7 @@ export function apply(context: Context, config: Config): void {
               speaker: session?.username || identity.userId,
               text: request.text,
               addressedTo: 'bot',
-              sentAt: new Date(session?.timestamp || Date.now()).toISOString(),
+              sentAt: sessionTimestamp(session),
             }),
           );
           await review.store.append(identity.botId, scope.id, {
