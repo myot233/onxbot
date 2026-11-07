@@ -7,6 +7,7 @@ import {
 import { takeRight } from 'lodash-es';
 import type { ConversationIdentity } from '../conversation/types.js';
 import { ChatInputError } from '../errors.js';
+import { chatTimestamp } from '../time.js';
 
 export interface ContextRequest {
   identity: ConversationIdentity;
@@ -63,7 +64,7 @@ export class ContextBuilder {
       {
         role: 'system',
         content: request.sentAt
-          ? `${this.options.systemPrompt}\nThe sentAt metadata gives message time in ISO 8601. Interpret relative dates in Asia/Shanghai. Earlier messages without timestamps have unknown times.`
+          ? `${this.options.systemPrompt}\nThe sentAt metadata already gives Asia/Shanghai message time with an explicit +08:00 offset. Preserve that offset when recording it and interpret relative dates using its local date. Earlier messages without timestamps have unknown times.`
           : this.options.systemPrompt,
       },
     ];
@@ -91,7 +92,10 @@ export class ContextBuilder {
           sentAt &&
           message.role !== 'tool' &&
           typeof message.content === 'string'
-            ? { ...message, content: `[sentAt: ${sentAt}]\n${message.content}` }
+            ? {
+                ...message,
+                content: `[sentAt: ${chatTimestamp(sentAt)}]\n${message.content}`,
+              }
             : message,
       ),
     );
@@ -100,7 +104,9 @@ export class ContextBuilder {
         ? [
             {
               role: 'user' as const,
-              content: JSON.stringify({ sentAt: request.sentAt }),
+              content: JSON.stringify({
+                sentAt: chatTimestamp(request.sentAt),
+              }),
             },
           ]
         : []),

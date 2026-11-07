@@ -11,6 +11,7 @@ import {
 } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { z } from 'zod';
+import { chatTimestamp } from './time.js';
 import { defineTool, type Tool } from './turn/tools.js';
 
 export type MemoryScope =
@@ -19,7 +20,7 @@ export type MemoryScope =
 
 const maxFileBytes = 8_192;
 const recordedAtFooter =
-  /\n\nRecorded at: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/;
+  /\n\nRecorded at: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}(?:Z|\+08:00)$/;
 const scopeId = z.string().regex(/^\d{1,32}$/);
 const filename = z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,59}\.md$/u);
 
@@ -126,7 +127,7 @@ export class MarkdownMemory {
         execute: async ({ scope: requested, filename: name, content }) => {
           const { parts, folder } = directory(requested);
           const body = content.replace(recordedAtFooter, '');
-          const markdown = `${body}\n\nRecorded at: ${new Date().toISOString()}\n`;
+          const markdown = `${body}\n\nRecorded at: ${chatTimestamp()}\n`;
           if (Buffer.byteLength(markdown) > maxFileBytes)
             return '文件过大，请精简或分成多份。';
           if (this.closed || this.queued >= 128)
