@@ -212,6 +212,91 @@ it('reports failed writes at flush and continues processing queued notes', async
   }
 });
 
+it('replaces copied metadata with one storage footer on repeated writes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
+  const errors = vi.fn();
+  const memory = new MarkdownMemory(root, errors);
+  let step = 0;
+  let staged = '';
+  const agent = new ConversationAgent(
+    new TurnRunner(
+      sdkModel(({ prompt }) => {
+        switch (step++) {
+          case 0:
+            return call('write_memory', {
+              filename: 'club.md',
+              content:
+                '# Club\n\nsource=2026-01-02 19:45Z\n\nRecorded at: 2026-01-03T03:50+08:00\n\nUpdated: 2026-01-03T04:00+08:00',
+            });
+          case 1:
+            return call('read_memory', { filename: 'club.md' });
+          case 2: {
+            const result = prompt.at(-1);
+            const part =
+              result?.role === 'tool' ? result.content[0] : undefined;
+            if (part?.type !== 'tool-result' || part.output.type !== 'text')
+              throw new Error('Expected staged note');
+            staged = part.output.value;
+            return call('write_memory', {
+              filename: 'club.md',
+              content: `${staged}\nUpdated: 2026-01-03T05:00+08:00\n\nThe club meets weekly.`,
+            });
+          }
+          default:
+            return sdkResult([{ type: 'text', text: 'Done' }]);
+        }
+      }),
+    ),
+    memory,
+  );
+  try {
+    await agent.run(prompt, { kind: 'group', id: '42' });
+    await memory.flush();
+    const stored = await readFile(join(root, 'group/42/club.md'), 'utf8');
+    for (const note of [staged, stored]) {
+      expect(note.match(/^Recorded at:/gm)).toHaveLength(1);
+      expect(note).not.toContain('Updated:');
+      expect(note).toContain('source=2026-01-03T03:45+08:00');
+      expect(note).toMatch(/\n\nRecorded at: \d{4}-\d\d-\d\dT[^\n]+\+08:00\n$/);
+    }
+    expect(stored).toContain('The club meets weekly.');
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    await memory.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('rejects a metadata-only note without creating a file', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
+  const memory = new MarkdownMemory(root, vi.fn());
+  let step = 0;
+  const agent = new ConversationAgent(
+    new TurnRunner(
+      sdkModel(({ prompt }) => {
+        if (step++ === 0)
+          return call('write_memory', {
+            filename: 'empty.md',
+            content: 'Recorded at: 2026-01-02T09:30+08:00',
+          });
+        expect(JSON.stringify(prompt.at(-1))).toContain('记忆正文为空');
+        return sdkResult([{ type: 'text', text: 'Done' }]);
+      }),
+    ),
+    memory,
+  );
+  try {
+    await agent.run(prompt, { kind: 'group', id: '42' });
+    await memory.flush();
+    await expect(
+      readFile(join(root, 'group/42/empty.md')),
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    await memory.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 it('sends each short group reply separately and in order', async () => {
   const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
   const memory = new MarkdownMemory(root, vi.fn());
