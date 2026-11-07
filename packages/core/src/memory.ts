@@ -12,6 +12,7 @@ import {
 import { join, resolve, sep } from 'node:path';
 import PQueue from 'p-queue';
 import { z } from 'zod';
+import { memoryBody } from './memory-document.js';
 import { chatTimestamp } from './time.js';
 import { defineTool, type Tool } from './turn/tools.js';
 
@@ -20,8 +21,6 @@ export type MemoryScope =
   | { kind: 'user'; id: string };
 
 const maxFileBytes = 8_192;
-const recordedAtFooter =
-  /\n\nRecorded at: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}(?:Z|\+08:00)$/;
 const scopeId = z.string().regex(/^\d{1,32}$/);
 const filename = z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,59}\.md$/u);
 
@@ -146,7 +145,7 @@ export class MarkdownMemory {
       defineTool({
         name: 'write_memory',
         description:
-          'Create or replace a Markdown memory file by topic. You MUST read an existing file before updating it and retain facts that still apply. Writes run in the background.',
+          'Create or replace a concise topical memory with useful supported facts. You MUST read an existing file before updating it, retain useful valid facts, and remove unsupported or redundant fragments. You MUST submit body content only, without Recorded at or Updated metadata. Known timestamps MUST include a full date and explicit time-zone offset. Writes run in the background.',
         input: z.object({
           scope: target,
           ...userSelection,
@@ -168,7 +167,9 @@ export class MarkdownMemory {
             (readVersions.get(path) ?? 0) !== (this.versions.get(path) ?? 0)
           )
             return 'This note changed after it was read. Read it again before updating.';
-          const body = content.replace(recordedAtFooter, '');
+          const body = memoryBody(content);
+          if (!body)
+            return '记忆正文为空，请提供有用的事实，不要只提交时间元数据。';
           const markdown = `${body}\n\nRecorded at: ${chatTimestamp()}\n`;
           if (Buffer.byteLength(markdown) > maxFileBytes)
             return '文件过大，请精简或分成多份。';
