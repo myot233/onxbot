@@ -12,6 +12,7 @@ type GroupSend = (text: string, index: number) => Promise<boolean>;
 export interface GroupLine {
   speaker: string;
   text: string;
+  userId?: string;
   sentAt?: string;
   quote?: string;
   addressedTo?: GroupMessage['addressedTo'];
@@ -33,6 +34,7 @@ export interface GroupMessage extends GroupLine {
 export function prepareGroupLine(message: GroupMessage): GroupLine {
   return {
     speaker: message.speaker.slice(0, 60),
+    ...(message.userId && { userId: message.userId }),
     text: message.text.slice(0, 400),
     sentAt: message.sentAt ?? new Date().toISOString(),
     addressedTo: message.addressedTo,

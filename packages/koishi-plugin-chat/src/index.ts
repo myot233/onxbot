@@ -8,6 +8,7 @@ import {
   type GroupChat,
   type GroupFeedback,
   type GroupLine,
+  type GroupMemoryReviewStore,
   type GroupMessage,
   type GroupTopicStore,
   type MemoryScope,
@@ -36,6 +37,7 @@ export interface Config {
     ids: readonly string[];
     chat: GroupChat;
     topics?: { ids: readonly string[]; store: GroupTopicStore };
+    memoryReview?: { ids: readonly string[]; store: GroupMemoryReviewStore };
     tools?: {
       ids: readonly string[];
       create(bot: Session['bot'], target: GroupToolTarget): readonly Tool[];
@@ -67,10 +69,11 @@ export function apply(context: Context, config: Config): void {
   const enabledGroups = new Set(config.group?.ids);
   const feedbackGroups = new Set(config.feedback?.ids);
   if (config.group) {
-    const { chat, topics, tools } = config.group;
+    const { chat, topics, tools, memoryReview } = config.group;
     const toolGroups = new Set(tools?.ids);
     const topicIds = topics?.ids.filter((id) => enabledGroups.has(id)) ?? [];
     const topicGroups = new Set(topicIds);
+    const reviewGroups = new Set(memoryReview?.ids);
     const recordTopicLine = async (
       botId: string,
       groupId: string,
@@ -78,9 +81,12 @@ export function apply(context: Context, config: Config): void {
       human: boolean,
     ) => {
       try {
-        await topics?.store.append(botId, groupId, line, human);
+        if (topicGroups.has(groupId))
+          await topics?.store.append(botId, groupId, line, human);
+        if (reviewGroups.has(groupId))
+          await memoryReview?.store.append(botId, groupId, line);
       } catch {
-        logger.warn('Could not persist scheduled topic context.');
+        logger.warn('Could not persist group background context.');
       }
     };
     if (topics && topicIds.length) {
@@ -227,7 +233,7 @@ export function apply(context: Context, config: Config): void {
         ...(quote && { quote }),
       };
       const trackTopic = topicGroups.has(guildId);
-      if (trackTopic)
+      if (trackTopic || reviewGroups.has(guildId))
         await recordTopicLine(
           session.selfId,
           guildId,
@@ -247,7 +253,7 @@ export function apply(context: Context, config: Config): void {
                     : [h.text(reply)],
                 )) ?? [];
               replyId ??= id;
-              if (id && trackTopic)
+              if (id && (trackTopic || reviewGroups.has(guildId)))
                 await recordTopicLine(
                   session.selfId,
                   guildId,
@@ -334,14 +340,42 @@ export function apply(context: Context, config: Config): void {
           }),
         });
       const { platform, botId, channelId, userId } = identity;
-      return h.text(
+      const reply =
         config.observe && request.type === 'chat'
           ? await config.observe(
               `${platform}/${botId}/chat/${channelId}/${userId}`,
               run,
             )
-          : await run(),
-      );
+          : await run();
+      const review = config.group?.memoryReview;
+      if (
+        request.type === 'chat' &&
+        scope?.kind === 'group' &&
+        review?.ids.includes(scope.id)
+      ) {
+        try {
+          await review.store.append(
+            identity.botId,
+            scope.id,
+            prepareGroupLine({
+              roomId: scope.id,
+              userId: identity.userId,
+              speaker: session?.username || identity.userId,
+              text: request.text,
+              addressedTo: 'bot',
+              sentAt: new Date(session?.timestamp || Date.now()).toISOString(),
+            }),
+          );
+          await review.store.append(identity.botId, scope.id, {
+            speaker: '你（onxbot）',
+            text: reply.slice(0, 400),
+            sentAt: new Date().toISOString(),
+          });
+        } catch {
+          logger.warn('Could not persist command review context.');
+        }
+      }
+      return h.text(reply);
     } catch (error) {
       if (error instanceof ChatInputError) return h.text(error.message);
       logger.warn(
