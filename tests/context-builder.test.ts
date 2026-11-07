@@ -128,3 +128,23 @@ describe('context construction', () => {
     ).toThrow(ContextLimitError);
   });
 });
+
+it('renders stored UTC and offset message times in Shanghai without shifting twice', async () => {
+  const builder = new ContextBuilder({
+    systemPrompt: 'Be concise.',
+    historyTurns: 1,
+  });
+  const context = await builder.build({
+    identity,
+    input: '今天见',
+    sentAt: '2026-11-07T00:00:01+08:00',
+    history: [
+      { role: 'user', content: '明天见', sentAt: '2026-11-06T15:59:59Z' },
+      { role: 'assistant', content: '好', sentAt: '2026-11-06T16:00:00Z' },
+    ],
+  });
+  const messages = context.messages();
+  expect(JSON.stringify(messages)).toContain('2026-11-06T23:59:59.000+08:00');
+  expect(JSON.stringify(messages)).toContain('2026-11-07T00:00:00.000+08:00');
+  expect(JSON.stringify(messages)).toContain('2026-11-07T00:00:01.000+08:00');
+});

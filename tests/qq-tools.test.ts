@@ -10,6 +10,7 @@ it('binds QQ calls to the turn and rejects a quoted message from another group',
         messages: [
           {
             sender: { nickname: 'A', user_id: '7' },
+            time: Date.parse('2026-11-06T16:35:18Z') / 1000,
             message: [
               { type: 'text', data: { text: '周三读书会' } },
               {
@@ -64,6 +65,7 @@ it('binds QQ calls to the turn and rejects a quoted message from another group',
         return call('qq_group_history', { limit: 3, groupId: '99' });
       case 1:
         expect(output).toContain('周三读书会');
+        expect(output).toContain('2026-11-07T00:35:18.000+08:00');
         expect(output).not.toContain('private-media-url');
         return call('qq_read_forward', { source: 'quote' });
       case 2:

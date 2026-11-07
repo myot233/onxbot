@@ -1,4 +1,4 @@
-import { defineTool, type Tool } from '@onxbot/core';
+import { chatTimestamp, defineTool, type Tool } from '@onxbot/core';
 import type { GroupToolTarget } from '@onxbot/koishi-plugin-chat';
 import { z } from 'zod';
 
@@ -110,7 +110,7 @@ function summarizeMessages(messages: unknown[], limit: number) {
       {
         speaker: (sender?.card || sender?.nickname)?.slice(0, 60),
         text: summarizeSegments(body),
-        ...(time && { sentAt: new Date(time * 1_000).toISOString() }),
+        ...(time && { sentAt: chatTimestamp(time * 1_000) }),
       },
     ];
   });
