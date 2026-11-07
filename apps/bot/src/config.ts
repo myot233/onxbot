@@ -43,6 +43,7 @@ const environment = z.object({
   CHAT_HISTORY_TURNS: z.coerce.number().int().min(0).max(100).default(10),
   CHAT_GROUP_IDS: groupIds,
   CHAT_TOPIC_GROUP_IDS: groupIds,
+  CHAT_MEMORY_REVIEW_GROUP_IDS: groupIds,
   CHAT_QQ_TOOL_GROUP_IDS: groupIds,
   CHAT_FEEDBACK_GROUP_IDS: groupIds,
   CHAT_MAX_INPUT_CHARS: z.coerce
@@ -74,6 +75,7 @@ export interface BotConfig {
   chat: ChatOptions;
   groupIds: readonly string[];
   topicGroupIds: readonly string[];
+  memoryReviewGroupIds: readonly string[];
   qqToolGroupIds: readonly string[];
   feedbackGroupIds: readonly string[];
   groupSystemPrompt: string;
@@ -142,6 +144,7 @@ export function loadConfig(
     provider,
     groupIds: env.CHAT_GROUP_IDS,
     topicGroupIds: env.CHAT_TOPIC_GROUP_IDS,
+    memoryReviewGroupIds: env.CHAT_MEMORY_REVIEW_GROUP_IDS,
     qqToolGroupIds: env.CHAT_QQ_TOOL_GROUP_IDS,
     feedbackGroupIds: env.CHAT_FEEDBACK_GROUP_IDS,
     groupSystemPrompt: env.CHAT_GROUP_SYSTEM_PROMPT || env.CHAT_SYSTEM_PROMPT,

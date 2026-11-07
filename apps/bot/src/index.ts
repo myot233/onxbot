@@ -7,16 +7,19 @@ import {
   ConversationService,
   GroupChat,
   MarkdownMemory,
+  MemoryReview,
   TurnRunner,
 } from '@onxbot/core';
 import {
   createConversationStore,
   createDatabase,
   createGroupFeedback,
+  createGroupMemoryReviewStore,
   createGroupTopicStore,
 } from '@onxbot/database';
 import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
+import { startMemoryReviewCron } from './memory-review-cron.js';
 import { createObservationPanel } from './observe/panel.js';
 import { TraceBuffer } from './observe/traces.js';
 import { createBotRuntime } from './runtime.js';
@@ -76,6 +79,13 @@ async function main(): Promise<void> {
     config.topicGroupIds.some((id) => config.groupIds.includes(id))
       ? createGroupTopicStore(db)
       : undefined;
+  const reviewGroups = config.memoryReviewGroupIds.filter((id) =>
+    config.groupIds.includes(id),
+  );
+  const reviewStore =
+    config.provider.type === 'openai' && reviewGroups.length
+      ? createGroupMemoryReviewStore(db)
+      : undefined;
   const runtime = createBotRuntime(
     config,
     service,
@@ -87,14 +97,17 @@ async function main(): Promise<void> {
     feedback,
     traces?.run,
     topics,
+    reviewStore,
   );
   const { context } = runtime;
   const logger = context.logger('onxbot');
+  let stopMemoryReview: (() => Promise<void>) | undefined;
 
   let stopping: Promise<void> | undefined;
   const stop = () =>
     (stopping ??= (async () => {
       try {
+        await stopMemoryReview?.();
         await runtime.stop();
       } finally {
         await Promise.all([
@@ -140,6 +153,25 @@ async function main(): Promise<void> {
       );
     }
     await context.start();
+    if (reviewStore) {
+      // Fail startup if the required migration has not been applied.
+      await db
+        .selectFrom('group_memory_schedules')
+        .select('group_id')
+        .limit(0)
+        .execute();
+      stopMemoryReview = startMemoryReviewCron({
+        botId: config.onebot.selfId,
+        groupIds: reviewGroups,
+        store: reviewStore,
+        review: new MemoryReview(
+          new TurnRunner(model, { maxModelCalls: 24 }),
+          memory,
+          reviewStore,
+        ),
+        ...(traces && { observe: traces.run }),
+      });
+    }
     logger.info(
       'Started: OneBot %s, provider %s. Commands: /chat <text>, /reset',
       config.onebot.selfId,

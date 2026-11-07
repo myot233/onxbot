@@ -15,7 +15,7 @@ import { chatTimestamp } from './time.js';
 import { defineTool, type Tool } from './turn/tools.js';
 
 export type MemoryScope =
-  | { kind: 'group'; id: string; userId?: string }
+  | { kind: 'group'; id: string; userId?: string; userIds?: readonly string[] }
   | { kind: 'user'; id: string };
 
 const maxFileBytes = 8_192;
@@ -31,9 +31,11 @@ function hasCode(error: unknown, code: string): boolean {
 export class MarkdownMemory {
   private readonly root: string;
   private readonly pending = new Map<string, { markdown: string }>();
+  private readonly versions = new Map<string, number>();
   private writes = Promise.resolve();
   private queued = 0;
   private closed = false;
+  private failedWrites = 0;
 
   constructor(
     root: string,
@@ -42,18 +44,39 @@ export class MarkdownMemory {
     this.root = resolve(root);
   }
 
-  tools(scope: MemoryScope): readonly Tool[] {
+  tools(
+    scope: MemoryScope,
+    canWrite?: () => Promise<boolean>,
+  ): readonly Tool[] {
     const id = scopeId.parse(scope.id);
+    const readVersions = new Map<string, number>();
     const baseParts = [scope.kind, id];
     const memberId =
       scope.kind === 'group' ? scopeId.safeParse(scope.userId).data : undefined;
-    const memberParts = memberId ? ['user', memberId, 'group', id] : undefined;
+    const memberIds =
+      scope.kind === 'group' && scope.userIds
+        ? [...new Set(scope.userIds.map((value) => scopeId.parse(value)))]
+        : [];
+    const userSelection = {
+      userId: z
+        .enum(memberIds.length ? memberIds : [memberId ?? id])
+        .optional(),
+    };
     const target = (
-      memberParts ? z.enum(['group', 'user']) : z.literal(scope.kind)
+      memberId || memberIds.length
+        ? z.enum(['group', 'user'])
+        : z.literal(scope.kind)
     ).optional();
-    const directory = (requested?: 'group' | 'user') => {
+    const directory = (requested?: 'group' | 'user', selected?: string) => {
+      const userId = selected ?? memberId;
+      if (requested === 'user' && scope.kind === 'group' && !userId)
+        throw new Error(
+          'A userId from this review batch is required for member memory.',
+        );
       const parts =
-        requested === 'user' && memberParts ? memberParts : baseParts;
+        requested === 'user' && scope.kind === 'group' && userId
+          ? ['user', userId, 'group', id]
+          : baseParts;
       return { parts, folder: join(this.root, ...parts) };
     };
     return [
@@ -61,9 +84,9 @@ export class MarkdownMemory {
         name: 'list_memory',
         description:
           'List Markdown memory filenames within the selected scope.',
-        input: z.object({ scope: target }),
-        execute: async ({ scope: requested }) => {
-          const { parts, folder } = directory(requested);
+        input: z.object({ scope: target, ...userSelection }),
+        execute: async ({ scope: requested, userId }) => {
+          const { parts, folder } = directory(requested, userId);
           const names = new Set<string>();
           try {
             await this.checkFolder(parts, false);
@@ -88,12 +111,16 @@ export class MarkdownMemory {
         name: 'read_memory',
         description:
           'Read a Markdown memory file by name within the selected scope.',
-        input: z.object({ scope: target, filename }),
-        execute: async ({ scope: requested, filename: name }) => {
-          const { parts, folder } = directory(requested);
+        input: z.object({ scope: target, filename, ...userSelection }),
+        execute: async ({ scope: requested, filename: name, userId }) => {
+          const { parts, folder } = directory(requested, userId);
           const path = join(folder, name);
+          const version = this.versions.get(path) ?? 0;
           const staged = this.pending.get(path);
-          if (staged) return staged.markdown;
+          if (staged) {
+            readVersions.set(path, version);
+            return staged.markdown;
+          }
           try {
             await this.checkFolder(parts, false);
             const file = await open(
@@ -104,6 +131,7 @@ export class MarkdownMemory {
               if (!(await file.stat()).isFile()) return '记忆文件不可读。';
               const buffer = Buffer.alloc(maxFileBytes);
               const { bytesRead } = await file.read(buffer);
+              readVersions.set(path, version);
               return buffer.toString('utf8', 0, bytesRead);
             } finally {
               await file.close();
@@ -121,18 +149,33 @@ export class MarkdownMemory {
           'Create or replace a Markdown memory file by topic. You MUST read an existing file before updating it and retain facts that still apply. Writes run in the background.',
         input: z.object({
           scope: target,
+          ...userSelection,
           filename,
           content: z.string().trim().min(1).max(8_192),
         }),
-        execute: async ({ scope: requested, filename: name, content }) => {
-          const { parts, folder } = directory(requested);
+        execute: async ({
+          scope: requested,
+          filename: name,
+          content,
+          userId,
+        }) => {
+          if (canWrite && !(await canWrite()))
+            throw new Error('The memory review lease expired.');
+          const { parts, folder } = directory(requested, userId);
+          const path = join(folder, name);
+          if (
+            (canWrite || readVersions.has(path)) &&
+            (readVersions.get(path) ?? 0) !== (this.versions.get(path) ?? 0)
+          )
+            return 'This note changed after it was read. Read it again before updating.';
           const body = content.replace(recordedAtFooter, '');
           const markdown = `${body}\n\nRecorded at: ${chatTimestamp()}\n`;
           if (Buffer.byteLength(markdown) > maxFileBytes)
             return '文件过大，请精简或分成多份。';
           if (this.closed || this.queued >= 128)
             return '记忆写入队列暂不可用。';
-          this.enqueue(parts, join(folder, name), markdown);
+          this.enqueue(parts, path, markdown);
+          readVersions.set(path, this.versions.get(path) ?? 0);
           return '记忆已进入后台写入队列。';
         },
       }),
@@ -144,12 +187,21 @@ export class MarkdownMemory {
     await this.writes;
   }
 
+  async flush(): Promise<void> {
+    await this.writes;
+    if (this.failedWrites) {
+      this.failedWrites = 0;
+      throw new Error('A memory write failed before the review checkpoint.');
+    }
+  }
+
   private enqueue(
     parts: readonly string[],
     path: string,
     markdown: string,
   ): void {
     const entry = { markdown };
+    this.versions.set(path, (this.versions.get(path) ?? 0) + 1);
     this.pending.set(path, entry);
     this.queued += 1;
     this.writes = this.writes
@@ -164,7 +216,10 @@ export class MarkdownMemory {
           throw error;
         }
       })
-      .catch(this.onError)
+      .catch((error: unknown) => {
+        this.failedWrites += 1;
+        this.onError(error);
+      })
       .finally(() => {
         this.queued -= 1;
         if (this.pending.get(path) === entry) this.pending.delete(path);

@@ -4,6 +4,7 @@ import type {
   ChatService,
   GroupChat,
   GroupFeedback,
+  GroupMemoryReviewStore,
   GroupTopicStore,
 } from '@onxbot/core';
 import * as chatPlugin from '@onxbot/koishi-plugin-chat';
@@ -27,6 +28,7 @@ export function createBotRuntime(
   feedback?: GroupFeedback,
   observe?: chatPlugin.Config['observe'],
   topics?: GroupTopicStore,
+  memoryReview?: GroupMemoryReviewStore,
 ): { context: KoishiContext; stop(): Promise<void> } {
   const context = new Context({ prefix: ['/'], prefixMode: 'strict' });
   context.plugin(HTTP);
@@ -49,6 +51,12 @@ export function createBotRuntime(
           chat: groupChat,
           ...(topics && {
             topics: { ids: config.topicGroupIds, store: topics },
+          }),
+          ...(memoryReview && {
+            memoryReview: {
+              ids: config.memoryReviewGroupIds,
+              store: memoryReview,
+            },
           }),
           ...(config.provider.type === 'openai' &&
             config.qqToolGroupIds.length && {

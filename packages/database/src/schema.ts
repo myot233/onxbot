@@ -5,6 +5,19 @@ import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 type Timestamp = ColumnType<Date, Date | string | undefined, Date | string>;
 
 export interface Database {
+  group_memory_schedules: {
+    bot_id: string;
+    group_id: string;
+    next_run_at: Timestamp;
+    lease: string | null;
+    lease_until: Timestamp | null;
+  };
+  group_memory_messages: {
+    id: Generated<string>;
+    bot_id: string;
+    group_id: string;
+    line: JSONColumnType<GroupLine>;
+  };
   group_topic_schedules: {
     bot_id: string;
     group_id: string;
