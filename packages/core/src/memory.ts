@@ -9,7 +9,7 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import PQueue from 'p-queue';
 import { z } from 'zod';
 import { memoryBody } from './memory-document.js';
@@ -23,6 +23,21 @@ export type MemoryScope =
 const maxFileBytes = 8_192;
 const scopeId = z.string().regex(/^\d{1,32}$/);
 const filename = z.string().regex(/^[\p{L}\p{N}][\p{L}\p{N}_ -]{0,59}\.md$/u);
+const documentPath = z.string().refine((value) => {
+  const parts = value.split('/');
+  if (
+    !filename.safeParse(parts.at(-1)).success ||
+    !scopeId.safeParse(parts[1]).success
+  )
+    return false;
+  return (
+    (parts.length === 3 && (parts[0] === 'group' || parts[0] === 'user')) ||
+    (parts.length === 5 &&
+      parts[0] === 'user' &&
+      parts[2] === 'group' &&
+      scopeId.safeParse(parts[3]).success)
+  );
+});
 
 function hasCode(error: unknown, code: string): boolean {
   return error instanceof Error && 'code' in error && error.code === code;
@@ -41,6 +56,84 @@ export class MarkdownMemory {
     private readonly onError: (error: unknown) => void,
   ) {
     this.root = resolve(root);
+  }
+
+  /** Administrator-only read interface; never exposed as a conversation tool. */
+  async listDocuments(): Promise<string[]> {
+    const paths = new Set<string>();
+    const pendingPaths = [...this.pending.keys()];
+    const walk = async (parts: string[]): Promise<void> => {
+      try {
+        await this.checkFolder(parts, false);
+        for (const entry of await readdir(join(this.root, ...parts), {
+          withFileTypes: true,
+        })) {
+          const next = [...parts, entry.name];
+          const path = next.join('/');
+          if (entry.isFile() && documentPath.safeParse(path).success)
+            paths.add(path);
+          else if (
+            entry.isDirectory() &&
+            ((parts.length === 1 && scopeId.safeParse(entry.name).success) ||
+              (parts.length === 2 &&
+                parts[0] === 'user' &&
+                entry.name === 'group') ||
+              (parts.length === 3 && scopeId.safeParse(entry.name).success))
+          )
+            await walk(next);
+        }
+      } catch (error) {
+        if (!hasCode(error, 'ENOENT')) throw error;
+      }
+    };
+    await walk(['group']);
+    await walk(['user']);
+    for (const path of [...pendingPaths, ...this.pending.keys()]) {
+      const name = relative(this.root, path).split(sep).join('/');
+      if (documentPath.safeParse(name).success) paths.add(name);
+    }
+    return [...paths].sort();
+  }
+
+  async readDocument(path: string): Promise<string | undefined> {
+    if (!documentPath.safeParse(path).success) return undefined;
+    const parts = path.split('/');
+    const name = parts.pop();
+    if (!name) return undefined;
+    const note = await this.readNote(parts, name);
+    if (note?.truncated)
+      throw new Error('Memory document exceeds the size limit.');
+    return note?.markdown;
+  }
+
+  private async readNote(
+    parts: readonly string[],
+    name: string,
+  ): Promise<{ markdown: string; truncated: boolean } | undefined> {
+    const staged = this.pending.get(join(this.root, ...parts, name));
+    if (staged) return { markdown: staged.markdown, truncated: false };
+    try {
+      await this.checkFolder(parts, false);
+      const file = await open(
+        join(this.root, ...parts, name),
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile()) throw new Error('Invalid memory document.');
+        const buffer = Buffer.alloc(maxFileBytes);
+        const { bytesRead } = await file.read(buffer);
+        return {
+          markdown: buffer.toString('utf8', 0, bytesRead),
+          truncated: stat.size > maxFileBytes,
+        };
+      } finally {
+        await file.close();
+      }
+    } catch (error) {
+      if (hasCode(error, 'ENOENT')) return undefined;
+      throw error;
+    }
   }
 
   tools(
@@ -117,26 +210,11 @@ export class MarkdownMemory {
           const { parts, folder } = directory(requested, userId);
           const path = join(folder, name);
           const version = this.versions.get(path) ?? 0;
-          const staged = this.pending.get(path);
-          if (staged) {
-            readVersions.set(path, version);
-            return staged.markdown;
-          }
           try {
-            await this.checkFolder(parts, false);
-            const file = await open(
-              path,
-              constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-            );
-            try {
-              if (!(await file.stat()).isFile()) return '记忆文件不可读。';
-              const buffer = Buffer.alloc(maxFileBytes);
-              const { bytesRead } = await file.read(buffer);
-              readVersions.set(path, version);
-              return buffer.toString('utf8', 0, bytesRead);
-            } finally {
-              await file.close();
-            }
+            const note = await this.readNote(parts, name);
+            if (!note) return '记忆文件不存在。';
+            readVersions.set(path, version);
+            return note.markdown;
           } catch (error) {
             return hasCode(error, 'ENOENT')
               ? '记忆文件不存在。'
@@ -235,6 +313,8 @@ export class MarkdownMemory {
   ): Promise<void> {
     let folder = this.root;
     if (create) await mkdir(folder, { recursive: true, mode: 0o700 });
+    if (!(await lstat(folder)).isDirectory())
+      throw new Error('Invalid memory directory.');
     for (const part of parts) {
       folder = join(folder, part);
       if (create) {
