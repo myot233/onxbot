@@ -143,6 +143,9 @@ importers:
       '@onxbot/core':
         specifier: workspace:*
         version: link:../core
+      croner:
+        specifier: ^11.0.0
+        version: 11.0.0
     devDependencies:
       koishi:
         specifier: 4.18.11

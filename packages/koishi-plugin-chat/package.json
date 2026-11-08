@@ -11,7 +11,8 @@
     }
   },
   "dependencies": {
-    "@onxbot/core": "workspace:*"
+    "@onxbot/core": "workspace:*",
+    "croner": "^11.0.0"
   },
   "peerDependencies": {
     "koishi": "^4.18.11"

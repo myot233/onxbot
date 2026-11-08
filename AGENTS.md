@@ -18,7 +18,7 @@ Keep each change local to the module that owns its behavior. Export a helper onl
 - Use ts-pattern for existing discriminated-union dispatch and lodash-es for reusable collection and escaping operations. Prefer named ESM imports.
 - Use `@date-fns/tz` through `chatTimestamp` for model-visible Asia/Shanghai times. Preserve stored instants and explicit offsets. Unknown historical times stay unknown.
 - Use `renderGroupLine` when presenting group metadata to a model and the Koishi session timestamp helper when receiving messages.
-- Use p-queue for serialized background memory writes and Croner for scheduled memory-review wakeups.
+- Use p-queue for serialized background memory writes and Croner for both proactive-topic and memory-review wakeups. Stop the jobs and drain in-flight work on shutdown; PostgreSQL owns their due times and progress.
 - Use Effect for memory-review orchestration and typed stage errors. Compose effects internally and run them at the Promise entry point. Keep existing AI SDK, Kysely, Koishi, and Zod interfaces. Promise operations without cancellation support must settle before interruption releases their batch. Preserve both task and cleanup failures. Database scheduling owns retries; do not replay the full review or message delivery with an automatic Effect retry.
 - Use Kysely transactions and row locks for durable claims and checkpoints. For background jobs, keep model requests and filesystem writes outside database transactions. Preserve the existing serialization of live conversations.
 
