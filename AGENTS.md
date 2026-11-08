@@ -28,6 +28,8 @@ Before adding a dependency, check its official documentation, runtime compatibil
 
 Agent instructions use English with explicit MUST and MUST NOT rules. User-facing group conversation is Chinese.
 
+Ordinary group messages omit commas and trailing punctuation. A clause that needs a comma must be shortened to one idea or expressed as a necessary separate message in a later step. Do not mechanically strip commas or substitute another separator to keep a long sentence.
+
 Preserve the configured group allowlists, cooldown, and direct-mention behavior unless the task changes them. The agent can call `send_message` in successive model steps. Native QQ reactions and pokes can complete an interaction. Keep tool targets bound to the current conversation.
 
 Proactive conversation defaults to a concrete contribution: an opinion, grounded detail, association, or light joke. Questions require a specific conversational purpose. Missing memory details and unfinished projects are not a follow-up backlog. Scheduled-turn instructions require one contribution and then waiting for a human; preserve ordinary agent multi-message behavior.
