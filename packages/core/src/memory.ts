@@ -87,6 +87,8 @@ export class MarkdownMemory {
         execute: async ({ scope: requested, userId }) => {
           const { parts, folder } = directory(requested, userId);
           const names = new Set<string>();
+          // A queued note can be renamed and leave pending during readdir.
+          const pendingPaths = [...this.pending.keys()];
           try {
             await this.checkFolder(parts, false);
             for (const entry of await readdir(folder, {
@@ -98,7 +100,7 @@ export class MarkdownMemory {
           } catch (error) {
             if (!hasCode(error, 'ENOENT')) return '记忆目录不可读。';
           }
-          for (const path of this.pending.keys()) {
+          for (const path of [...pendingPaths, ...this.pending.keys()]) {
             if (!path.startsWith(`${folder}${sep}`)) continue;
             const name = path.slice(folder.length + 1);
             if (filename.safeParse(name).success) names.add(name);

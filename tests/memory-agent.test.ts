@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -14,7 +14,7 @@ import { sdkModel, sdkResult } from './helpers/model.js';
 
 vi.mock('node:fs/promises', async (original) => {
   const fs = await original<typeof import('node:fs/promises')>();
-  return { ...fs, writeFile: vi.fn(fs.writeFile) };
+  return { ...fs, readdir: vi.fn(fs.readdir), writeFile: vi.fn(fs.writeFile) };
 });
 
 it('keeps an ambient group turn silent when it only writes memory', async () => {
@@ -207,6 +207,59 @@ it('reports failed writes at flush and continues processing queued notes', async
     });
     await expect(memory.flush()).resolves.toBeUndefined();
   } finally {
+    await memory.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it('lists a queued note even when it lands between directory enumeration and the pending scan', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
+  const errors = vi.fn();
+  const memory = new MarkdownMemory(root, errors);
+  const started = Promise.withResolvers<void>();
+  const write = Promise.withResolvers<void>();
+  const fs =
+    await vi.importActual<typeof import('node:fs/promises')>(
+      'node:fs/promises',
+    );
+  vi.mocked(writeFile).mockImplementationOnce(async (...args) => {
+    started.resolve();
+    await write.promise;
+    await fs.writeFile(...args);
+  });
+  vi.mocked(readdir).mockImplementationOnce(async (...args) => {
+    const listing = await fs.readdir(...args);
+    write.resolve();
+    await memory.flush();
+    return listing;
+  });
+  let step = 0;
+  const agent = new ConversationAgent(
+    new TurnRunner(
+      sdkModel(async ({ prompt }) => {
+        switch (step++) {
+          case 0:
+            return call('write_memory', {
+              filename: 'club.md',
+              content: 'Weekly reading club.',
+            });
+          case 1:
+            await started.promise;
+            return call('list_memory');
+          default:
+            expect(JSON.stringify(prompt.at(-1))).toContain('club.md');
+            return sdkResult([{ type: 'text', text: 'Done' }]);
+        }
+      }),
+    ),
+    memory,
+  );
+  try {
+    await agent.run(prompt, { kind: 'group', id: '42' });
+    expect(readdir).toHaveBeenCalled();
+    expect(errors).not.toHaveBeenCalled();
+  } finally {
+    write.resolve();
     await memory.close();
     await rm(root, { recursive: true, force: true });
   }
