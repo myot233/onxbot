@@ -4,17 +4,21 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MockLanguageModelV4 } from 'ai/test';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { traceIndexSchema } from '../apps/dashboard/src/contract.js';
 import { createDashboardServer } from '../apps/dashboard/src/server.js';
-import { TraceBuffer } from '../apps/dashboard/src/traces.js';
+import { TraceRecorder } from '../apps/dashboard/src/traces.js';
 import { defineTool, TurnRunner } from '../packages/core/src/index.js';
 import { createSdkModelProvider } from '../packages/model/src/index.js';
 import { sdkResult } from './helpers/model.js';
+import { memoryTraceStore } from './helpers/traces.js';
 
 it('shows actual per-step tool context only on authenticated, session-filtered requests', async () => {
-  const buffer = new TraceBuffer();
+  const store = memoryTraceStore();
+  const buffer = new TraceRecorder(store, (error) => {
+    throw error;
+  });
   const model = createSdkModelProvider(
     new MockLanguageModelV4({
       async doGenerate({ prompt }) {
@@ -59,8 +63,8 @@ it('shows actual per-step tool context only on authenticated, session-filtered r
       ),
     ),
   );
-  expect(buffer.list()).toHaveLength(2);
-  const group = buffer.list().find((trace) => trace.session === 'group/42');
+  expect((await store.list({ limit: 50 })).traces).toHaveLength(2);
+  const group = await store.get(1);
   expect(group?.events.map(({ phase }) => phase)).toEqual([
     'input',
     'output',
@@ -73,7 +77,7 @@ it('shows actual per-step tool context only on authenticated, session-filtered r
   expect(group?.events[2]?.content).not.toContain('prompt for user/13');
 
   const password = 'local-test-password-123456789';
-  const server = createDashboardServer(buffer, { password });
+  const server = createDashboardServer(store, { password });
   const listening = once(server, 'listening');
   server.listen(0, '127.0.0.1');
   await listening;
@@ -127,7 +131,7 @@ it('serves the dashboard and JSON without credentials by default and confines st
   await writeFile(join(assets, 'assets/app.js'), 'console.log("dashboard")');
   await writeFile(join(root, 'private.js'), 'private server code');
   await symlink(join(root, 'private.js'), join(assets, 'assets/escape.js'));
-  const server = createDashboardServer(new TraceBuffer(), {
+  const server = createDashboardServer(memoryTraceStore(), {
     assetsDir: assets,
   });
   const listening = once(server, 'listening');
@@ -161,8 +165,11 @@ it('serves the dashboard and JSON without credentials by default and confines st
   }
 });
 
-it('keeps bounded traces with explicit failure and truncation states', async () => {
-  const buffer = new TraceBuffer();
+it('persists bounded events with explicit failure and truncation states', async () => {
+  const store = memoryTraceStore();
+  const buffer = new TraceRecorder(store, (error) => {
+    throw error;
+  });
   await expect(
     buffer.run('group/42', async () => {
       for (let i = 0; i < 18; i++)
@@ -170,13 +177,115 @@ it('keeps bounded traces with explicit failure and truncation states', async () 
       throw new Error('model failed');
     }),
   ).rejects.toThrow('model failed');
-  expect(buffer.get(1)).toMatchObject({ status: '失败', truncated: true });
-  expect(buffer.get(1)?.finishedAt).toBeDefined();
-  expect(buffer.get(1)?.events).toHaveLength(16);
+  expect(await store.get(1)).toMatchObject({ status: '失败', truncated: true });
+  expect((await store.get(1))?.finishedAt).toBeDefined();
+  expect((await store.get(1))?.events).toHaveLength(16);
   for (let i = 0; i < 50; i++)
     await buffer.run('group/42', async () => {
       buffer.record({ phase: 'output', data: {} });
     });
-  expect(buffer.list()).toHaveLength(50);
-  expect(buffer.get(1)).toBeUndefined();
+  expect((await store.list({ limit: 100 })).traces).toHaveLength(51);
+  expect((await store.get(1))?.status).toBe('失败');
+});
+
+it('drains accepted writes on close and isolates persistence failures from work and model errors', async () => {
+  const store = memoryTraceStore();
+  const append = store.append;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  store.append = async (...args) => {
+    await gate;
+    await append(...args);
+  };
+  const errors = vi.fn();
+  const recorder = new TraceRecorder(store, errors);
+  const work = vi.fn(async () => {
+    recorder.record({
+      phase: 'input',
+      data: { providerOptions: { secret: 'hidden' }, text: 'visible' },
+    });
+    return 'delivered';
+  });
+  const turn = recorder.run('group/42', work);
+  await vi.waitFor(() => expect(work).toHaveBeenCalledOnce());
+  let closed = false;
+  const closing = recorder.close().then(() => {
+    closed = true;
+  });
+  expect(closed).toBe(false);
+  release();
+  await expect(turn).resolves.toBe('delivered');
+  await closing;
+  expect((await store.get(1))?.events[0]?.content).not.toContain('secret');
+  expect((await store.get(1))?.status).toBe('完成');
+  store.append = async () => {
+    throw new Error('write failed');
+  };
+  const failing = new TraceRecorder(store, errors);
+  const modelError = new Error('model failed');
+  await expect(
+    failing.run('group/42', async () => {
+      failing.record({ phase: 'output', data: {} });
+      throw modelError;
+    }),
+  ).rejects.toBe(modelError);
+  expect(errors).toHaveBeenCalledOnce();
+  expect(await store.get(2)).toMatchObject({ status: '失败', truncated: true });
+  store.start = async () => {
+    throw new Error('storage offline');
+  };
+  const fallback = vi.fn(async () => {
+    failing.record({ phase: 'input', data: {} });
+    return 'sent once';
+  });
+  await expect(failing.run('group/42', fallback)).resolves.toBe('sent once');
+  expect(fallback).toHaveBeenCalledOnce();
+  await failing.close();
+});
+
+it('validates paged queries and returns safe storage errors without breaking static delivery', async () => {
+  const store = memoryTraceStore();
+  const recorder = new TraceRecorder(store, () => {});
+  for (let i = 0; i < 4; i++)
+    await recorder.run(i % 2 ? 'group/42' : 'user/13', async () =>
+      recorder.record({ phase: 'input', data: {} }),
+    );
+  const server = createDashboardServer(store);
+  const listening = once(server, 'listening');
+  server.listen(0, '127.0.0.1');
+  await listening;
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    const first = traceIndexSchema.parse(
+      await (await fetch(`${base}/api/traces?limit=2`)).json(),
+    );
+    expect(first.traces.map((t) => t.id)).toEqual([4, 3]);
+    const second = traceIndexSchema.parse(
+      await (
+        await fetch(
+          `${base}/api/traces?limit=2&before=${first.nextCursor}&session=group%2F42`,
+        )
+      ).json(),
+    );
+    expect(second.traces.map((t) => t.id)).toEqual([2]);
+    for (const query of [
+      'limit=101',
+      'before=NaN',
+      'status=invalid',
+      'before=2147483648',
+    ])
+      expect((await fetch(`${base}/api/traces?${query}`)).status).toBe(400);
+    store.list = async () => {
+      throw new Error('private database connection details');
+    };
+    const failed = await fetch(`${base}/api/traces`);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain('private');
+    expect((await fetch(base)).status).toBe(200);
+  } finally {
+    await recorder.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });

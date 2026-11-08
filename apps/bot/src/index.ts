@@ -11,13 +11,14 @@ import {
   TurnRunner,
 } from '@onxbot/core';
 import { createDashboardServer } from '@onxbot/dashboard';
-import { TraceBuffer } from '@onxbot/dashboard/traces';
+import { TraceRecorder } from '@onxbot/dashboard/traces';
 import {
   createConversationStore,
   createDatabase,
   createGroupFeedback,
   createGroupMemoryReviewStore,
   createGroupTopicStore,
+  createTraceStore,
 } from '@onxbot/database';
 import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
@@ -28,12 +29,17 @@ import { createWebResearchTools } from './web-research.js';
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
   const db = createDatabase(config.databaseUrl);
-  const traces = config.observe ? new TraceBuffer() : undefined;
+  const traceStore = createTraceStore(db);
+  const traces = new TraceRecorder(traceStore, (error) =>
+    console.warn(
+      'Trace persistence failed:',
+      error instanceof Error ? error.message : 'unknown error',
+    ),
+  );
   const panel =
-    traces &&
     config.observe &&
-    createDashboardServer(traces, { password: config.observe.password });
-  const model = createModelProvider(config.provider, traces?.record);
+    createDashboardServer(traceStore, { password: config.observe.password });
+  const model = createModelProvider(config.provider, traces.record);
   const runner = new TurnRunner(model);
   const memory = new MarkdownMemory(config.memoryDir, (error) =>
     console.warn('Memory write failed:', error),
@@ -95,7 +101,7 @@ async function main(): Promise<void> {
       ...(agent && { agent }),
     }),
     feedback,
-    traces?.run,
+    traces.run,
     topics,
     reviewStore,
   );
@@ -110,14 +116,14 @@ async function main(): Promise<void> {
         await stopMemoryReview?.();
         await runtime.stop();
       } finally {
+        await traces.close();
         await Promise.all([
-          db.destroy(),
           memory.close(),
           panel &&
             new Promise<void>((resolve) => {
               panel.close(() => resolve());
             }),
-        ]);
+        ]).finally(() => db.destroy());
       }
     })());
   const onSignal = () => {
@@ -131,6 +137,7 @@ async function main(): Promise<void> {
   process.once('SIGTERM', onSignal);
 
   try {
+    await traces.initialize();
     await db
       .selectFrom('conversation_turns')
       .select(['id', 'messages'])
@@ -169,7 +176,7 @@ async function main(): Promise<void> {
           memory,
           reviewStore,
         ),
-        ...(traces && { observe: traces.run }),
+        observe: traces.run,
       });
     }
     logger.info(
