@@ -20,8 +20,19 @@
 
 !turbo.json
 !apps/dashboard/
-!apps/dashboard/**
+!apps/dashboard/package.json
+!apps/dashboard/tsconfig.json
+!apps/dashboard/tsconfig.server.json
+!apps/dashboard/vite.config.ts
+!apps/dashboard/index.html
+!apps/dashboard/public/
+!apps/dashboard/public/**
+!apps/dashboard/src/
+!apps/dashboard/src/**
 
 **/node_modules/
 **/dist/
 **/.turbo/
+
+**/.env
+**/.env.*
