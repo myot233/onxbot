@@ -16,6 +16,7 @@ import {
   type Tool,
 } from '@onxbot/core';
 import type { Context, Session } from 'koishi';
+import { startTopicCron } from './topic-cron.js';
 
 const { Argv, h } = createRequire(import.meta.url)(
   'koishi',
@@ -100,14 +101,12 @@ export function apply(context: Context, config: Config): void {
     };
     if (topics && topicIds.length) {
       let stopped = false;
-      let polling = false;
       const poll = async () => {
-        if (stopped || polling) return;
+        if (stopped) return;
         const bot = context.bots.find(
           (entry) => entry.platform === 'onebot' && entry.isActive,
         );
         if (!bot) return;
-        polling = true;
         try {
           const due = await topics.store.claimDue(
             bot.selfId,
@@ -160,14 +159,14 @@ export function apply(context: Context, config: Config): void {
             logger.warn('Scheduled group topic failed.');
         } catch {
           logger.warn('Could not claim scheduled group topics.');
-        } finally {
-          polling = false;
         }
       };
-      const timer = setInterval(() => void poll(), 5_000).unref();
-      context.on('dispose', () => {
+      const stopTopics = startTopicCron(poll, () => {
+        logger.warn('Scheduled group topic failed.');
+      });
+      context.on('dispose', async () => {
         stopped = true;
-        clearInterval(timer);
+        await stopTopics();
       });
     }
     context.on('message', async (session) => {
