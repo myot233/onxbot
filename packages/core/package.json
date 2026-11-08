@@ -27,5 +27,9 @@
   },
   "devDependencies": {
     "@types/lodash-es": "^4.17.12"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
   }
 }

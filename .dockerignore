@@ -17,3 +17,11 @@
 !packages/*/tsconfig.json
 !packages/*/src/
 !packages/*/src/**
+
+!turbo.json
+!apps/dashboard/
+!apps/dashboard/**
+
+**/node_modules/
+**/dist/
+**/.turbo/

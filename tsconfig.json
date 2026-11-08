@@ -1,10 +1,23 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/model" },
-    { "path": "packages/core" },
-    { "path": "packages/database" },
-    { "path": "packages/koishi-plugin-chat" },
-    { "path": "apps/bot" }
+    {
+      "path": "packages/model"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/database"
+    },
+    {
+      "path": "packages/koishi-plugin-chat"
+    },
+    {
+      "path": "apps/dashboard/tsconfig.server.json"
+    },
+    {
+      "path": "apps/bot"
+    }
   ]
 }

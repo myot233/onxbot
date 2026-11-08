@@ -5,12 +5,15 @@ This repository is a TypeScript ESM monorepo for a QQ conversation bot. Use Node
 ## Module responsibilities
 
 - `apps/bot` assembles configuration, the model, PostgreSQL stores, Koishi, the observation panel, web research, and Croner jobs.
+- `apps/dashboard` owns the React/Vite shadcn UI, read-only observation API, and bounded trace buffer. React renders trace contents as text. Keep API contracts in `src/contract.ts`; authentication is opt-in through `OBSERVE_PASSWORD`.
 - `packages/core` owns conversation context, group participation, agent tools, Markdown memory, and memory review. Accept external dependencies through existing interfaces.
 - `packages/model` adapts the Vercel AI SDK and model providers. Keep provider-specific options and model-message validation here.
 - `packages/database` implements persistence with Kysely and pg. Register new migrations in `src/migrate.ts`.
 - `packages/koishi-plugin-chat` translates QQ sessions into core inputs and delivers replies. Keep transport details in this adapter.
 
 Keep each change local to the module that owns its behavior. Export a helper only when callers actually need it. Extract repeated rules or transformations when their callers must stay consistent.
+
+Turborepo runs workspace builds in dependency order and caches `dist` plus TypeScript build metadata. Each workspace owns its build/typecheck scripts. Shared compiler settings are cache inputs. Frontend development uses Vite's `/api` proxy to the Bot observation port.
 
 ## Libraries and common logic
 

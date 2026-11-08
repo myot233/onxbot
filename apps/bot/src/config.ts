@@ -62,7 +62,7 @@ const environment = z.object({
 
 export interface BotConfig {
   webResearch: boolean;
-  observe?: { host: string; port: number; password: string };
+  observe?: { host: string; port: number; password?: string | undefined };
   databaseUrl: string;
   onebot: {
     protocol: 'ws';
@@ -92,8 +92,6 @@ export function loadConfig(
     );
   }
   const env = parsed.data;
-  if (env.OBSERVE_PORT && !env.OBSERVE_PASSWORD)
-    throw new Error('OBSERVE_PASSWORD is required when OBSERVE_PORT is set.');
   const provider = match(env.CHAT_PROVIDER)
     .returnType<ProviderConfig>()
     .with('echo', () => ({ type: 'echo' }))
@@ -125,14 +123,13 @@ export function loadConfig(
     );
   return {
     webResearch,
-    ...(env.OBSERVE_PORT &&
-      env.OBSERVE_PASSWORD && {
-        observe: {
-          host: env.OBSERVE_HOST,
-          port: env.OBSERVE_PORT,
-          password: env.OBSERVE_PASSWORD,
-        },
-      }),
+    ...(env.OBSERVE_PORT && {
+      observe: {
+        host: env.OBSERVE_HOST,
+        port: env.OBSERVE_PORT,
+        password: env.OBSERVE_PASSWORD,
+      },
+    }),
     databaseUrl: env.DATABASE_URL,
     onebot: {
       protocol: 'ws',

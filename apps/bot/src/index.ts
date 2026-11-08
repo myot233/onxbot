@@ -10,6 +10,8 @@ import {
   MemoryReview,
   TurnRunner,
 } from '@onxbot/core';
+import { createDashboardServer } from '@onxbot/dashboard';
+import { TraceBuffer } from '@onxbot/dashboard/traces';
 import {
   createConversationStore,
   createDatabase,
@@ -20,8 +22,6 @@ import {
 import { createModelProvider } from '@onxbot/model';
 import { loadConfig } from './config.js';
 import { startMemoryReviewCron } from './memory-review-cron.js';
-import { createObservationPanel } from './observe/panel.js';
-import { TraceBuffer } from './observe/traces.js';
 import { createBotRuntime } from './runtime.js';
 import { createWebResearchTools } from './web-research.js';
 
@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   const panel =
     traces &&
     config.observe &&
-    createObservationPanel(traces, config.observe.password);
+    createDashboardServer(traces, { password: config.observe.password });
   const model = createModelProvider(config.provider, traces?.record);
   const runner = new TurnRunner(model);
   const memory = new MarkdownMemory(config.memoryDir, (error) =>
