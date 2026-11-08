@@ -83,7 +83,7 @@ async function load<T>(
   if (!response.ok)
     throw new Error(
       response.status === 404
-        ? '该回合已不在内存中 请重新选择'
+        ? '该回合不存在 请重新选择'
         : `无法读取观测数据（${response.status}）`,
     );
   return schema.parse(await response.json());
@@ -92,7 +92,7 @@ function Status({ status }: { status: TraceSummary['status'] }) {
   return (
     <Badge
       variant="outline"
-      className={`status status-${status === '完成' ? 'done' : status === '失败' ? 'failed' : 'running'}`}
+      className={`status status-${status === '完成' ? 'done' : status === '失败' || status === '中断' ? 'failed' : 'running'}`}
     >
       <span className="status-dot" />
       {status}
@@ -146,9 +146,12 @@ function Detail({ trace }: { trace: Trace }) {
         [])
       : [],
   );
-  const elapsed = trace.finishedAt
-    ? `${((Date.parse(trace.finishedAt) - Date.parse(trace.startedAt)) / 1000).toFixed(1)} s`
-    : '进行中';
+  const elapsed =
+    trace.status === '中断'
+      ? '异常中断'
+      : trace.finishedAt
+        ? `${((Date.parse(trace.finishedAt) - Date.parse(trace.startedAt)) / 1000).toFixed(1)} s`
+        : '进行中';
   return (
     <Card className="detail-card">
       <header className="detail-header">
@@ -354,54 +357,66 @@ export function App() {
   );
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
+  const [cursors, setCursors] = useState<(number | undefined)[]>([undefined]);
+  const before = cursors.at(-1);
+  const params = new URLSearchParams({ limit: '50' });
+  if (session) params.set('session', session);
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  if (before) params.set('before', String(before));
+  const query = params.toString();
   const index = useQuery({
-    queryKey: ['traces'],
-    queryFn: ({ signal }) => load('/api/traces', traceIndexSchema, signal),
+    queryKey: ['traces', query],
+    queryFn: ({ signal }) =>
+      load(`/api/traces?${query}`, traceIndexSchema, signal),
     refetchInterval: auto ? 5000 : false,
   });
   const traces = index.data?.traces ?? [];
-  const sessions = [...new Set(traces.map((trace) => trace.session))];
-  const matching = traces.filter(
-    (trace) =>
-      (!session || trace.session === session) &&
-      (!status || trace.status === status) &&
-      `${trace.id} ${trace.session}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
-  const active =
-    matching.find((trace) => trace.id === selected) ??
-    (selected === undefined ? matching[0] : undefined);
+  const sessions = [
+    ...new Set([
+      ...(session ? [session] : []),
+      ...traces.map((trace) => trace.session),
+    ]),
+  ];
+  const matching = traces;
+  const filtered = Boolean(session || status || search || before);
+  const activeId = selected ?? traces[0]?.id;
+  const active = traces.find((trace) => trace.id === activeId);
   const detail = useQuery({
     queryKey: [
       'trace',
       index.data?.startedAt,
-      active?.id,
+      activeId,
       active?.eventCount,
       active?.status,
     ],
     queryFn: ({ signal }) =>
-      load(`/api/traces/${active?.id}`, traceSchema, signal),
-    enabled: Boolean(active),
-    refetchInterval: auto && active?.status === '运行中' ? 5000 : false,
+      load(`/api/traces/${activeId}`, traceSchema, signal),
+    enabled: Boolean(activeId),
+    refetchInterval:
+      auto &&
+      (active?.status === '运行中' || (!active && activeId !== undefined))
+        ? 5000
+        : false,
   });
   const chooseSession = (value: string) => {
     setSession(value);
     setSelected(undefined);
+    setCursors([undefined]);
   };
   useEffect(() => {
     const query = new URLSearchParams();
     if (session) query.set('session', session);
-    if (active) query.set('turn', String(active.id));
+    if (activeId) query.set('turn', String(activeId));
     window.history.replaceState(
       null,
       '',
       `${window.location.pathname}${query.size ? `?${query}` : ''}`,
     );
-    document.title = active
-      ? `回合 #${active.id} · Onxbot`
+    document.title = activeId
+      ? `回合 #${activeId} · Onxbot`
       : '会话追踪 · Onxbot';
-  }, [session, active]);
+  }, [session, activeId]);
   return (
     <div className="dashboard">
       <a className="skip-link" href="#main-title">
@@ -452,7 +467,7 @@ export function App() {
         <footer className="sidebar-footer">
           <Radio aria-hidden="true" />
           <div>
-            只读观测<span>进程内保留最近 50 个回合</span>
+            只读观测<span>PostgreSQL 持久保存回合</span>
           </div>
         </footer>
       </aside>
@@ -499,7 +514,7 @@ export function App() {
               <Button
                 onClick={() => {
                   void index.refetch();
-                  if (active) void detail.refetch();
+                  if (activeId) void detail.refetch();
                 }}
                 disabled={index.isFetching}
               >
@@ -514,27 +529,29 @@ export function App() {
           <div className="metrics">
             {[
               {
-                label: '保留回合',
+                label: '本页回合',
                 value: traces.length,
-                note: `最多 ${index.data?.limit ?? 50} 个`,
+                note: `每页 ${index.data?.limit ?? 50} 个`,
                 icon: Layers3,
               },
               {
-                label: '正在运行',
+                label: '本页运行中',
                 value: traces.filter((t) => t.status === '运行中').length,
                 note: '等待模型或工具返回',
                 icon: Activity,
               },
               {
-                label: '失败回合',
-                value: traces.filter((t) => t.status === '失败').length,
-                note: '当前保留范围内',
+                label: '本页异常',
+                value: traces.filter(
+                  (t) => t.status === '失败' || t.status === '中断',
+                ).length,
+                note: '包含失败和中断',
                 icon: CircleDot,
               },
               {
-                label: '活跃会话',
+                label: '本页会话',
                 value: sessions.length,
-                note: '按会话标识区分',
+                note: '按当前页会话标识区分',
                 icon: MessageSquare,
               },
             ].map(({ label, value, note, icon: Icon }) => (
@@ -564,7 +581,7 @@ export function App() {
           )}
           <div className="traces-heading">
             <h2>
-              最近回合 <Badge variant="secondary">{matching.length}</Badge>
+              历史回合 <Badge variant="secondary">{matching.length}</Badge>
             </h2>
             <span>
               <Clock3 aria-hidden="true" />
@@ -586,6 +603,7 @@ export function App() {
                     onChange={(e) => {
                       setSearch(e.target.value);
                       setSelected(undefined);
+                      setCursors([undefined]);
                     }}
                   />
                 </div>
@@ -613,10 +631,11 @@ export function App() {
                       onChange={(e) => {
                         setStatus(e.target.value);
                         setSelected(undefined);
+                        setCursors([undefined]);
                       }}
                     >
                       <option value="">全部状态</option>
-                      {['运行中', '完成', '失败'].map((value) => (
+                      {['运行中', '完成', '失败', '中断'].map((value) => (
                         <option key={value}>{value}</option>
                       ))}
                     </select>
@@ -655,12 +674,40 @@ export function App() {
                   </li>
                 ))}
               </ol>
+              <nav aria-label="回合分页" className="trace-pagination">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={cursors.length === 1 || index.isFetching}
+                  onClick={() => {
+                    setCursors(cursors.slice(0, -1));
+                    setSelected(undefined);
+                  }}
+                >
+                  上一页
+                </Button>
+                <span>第 {cursors.length} 页</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!index.data?.nextCursor || index.isFetching}
+                  onClick={() => {
+                    const next = index.data?.nextCursor;
+                    if (next) {
+                      setCursors([...cursors, next]);
+                      setSelected(undefined);
+                    }
+                  }}
+                >
+                  更早回合
+                </Button>
+              </nav>
               {!index.isPending && !matching.length && (
                 <div className="list-empty">
                   <Search aria-hidden="true" />
-                  <p>{traces.length ? '没有匹配的回合' : '还没有模型调用'}</p>
+                  <p>{filtered ? '没有匹配的回合' : '还没有模型调用'}</p>
                   <span>
-                    {traces.length
+                    {filtered
                       ? '试试其他筛选条件'
                       : '收到对话或定时任务运行后会显示在这里'}
                   </span>
@@ -668,9 +715,9 @@ export function App() {
               )}
             </Card>
             <div className="detail-slot">
-              {active && detail.data ? (
+              {activeId && detail.data ? (
                 <Detail
-                  key={`${index.data?.startedAt}-${active.id}`}
+                  key={`${index.data?.startedAt}-${activeId}`}
                   trace={detail.data}
                 />
               ) : (
@@ -681,7 +728,7 @@ export function App() {
                   <h2>
                     {detail.error
                       ? '回合暂不可用'
-                      : active
+                      : activeId
                         ? '正在读取详情'
                         : selected !== undefined
                           ? '这个回合已离开当前列表'
@@ -689,7 +736,7 @@ export function App() {
                   </h2>
                   <p>
                     {detail.error?.message ??
-                      (active
+                      (activeId
                         ? '正在加载实际的模型上下文'
                         : '选择左侧回合 查看模型输入与工具执行过程')}
                   </p>
@@ -707,7 +754,7 @@ export function App() {
           </div>
           <footer className="page-footer">
             <span>onxbot / conversation observability</span>
-            <span>仅展示保留的 trace · 重启后清空</span>
+            <span>PostgreSQL 持久保存 · 重启不丢失</span>
           </footer>
         </main>
       </div>

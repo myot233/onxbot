@@ -5,7 +5,7 @@ This repository is a TypeScript ESM monorepo for a QQ conversation bot. Use Node
 ## Module responsibilities
 
 - `apps/bot` assembles configuration, the model, PostgreSQL stores, Koishi, the observation panel, web research, and Croner jobs.
-- `apps/dashboard` owns the React/Vite shadcn UI, read-only observation API, and bounded trace buffer. React renders trace contents as text. Keep API contracts in `src/contract.ts`; authentication is opt-in through `OBSERVE_PASSWORD`.
+- `apps/dashboard` owns the React/Vite shadcn UI, read-only observation API, and asynchronous trace recorder. PostgreSQL owns trace summaries and ordered events; the shared telemetry contract lives in `packages/model/src/trace.ts`. React renders trace contents as text. Keep dashboard view contracts in `src/contract.ts`; authentication is opt-in through `OBSERVE_PASSWORD`.
 - `packages/core` owns conversation context, group participation, agent tools, Markdown memory, and memory review. Accept external dependencies through existing interfaces.
 - `packages/model` adapts the Vercel AI SDK and model providers. Keep provider-specific options and model-message validation here.
 - `packages/database` implements persistence with Kysely and pg. Register new migrations in `src/migrate.ts`.
@@ -70,6 +70,8 @@ TEST_DATABASE_URL=postgresql://user:password@127.0.0.1:5432/test_database pnpm t
 Integration tests create isolated schemas in the supplied PostgreSQL database. Use a disposable local test database. Keep integration test files sequential because database-wide migration introspection can race with another file dropping its schema. Add regression coverage for changed behavior that existing tests miss, especially timestamps, pending writes, tool scopes, claims, and checkpoints.
 
 Keep formatting changes scoped to touched files. Do not modify generated `dist` output.
+
+Trace IDs and history survive process restarts. Keep event writes ordered, drain them before closing the database, and keep telemetry failures from replaying models or delivered messages. A leased recorder renews only active spans and marks expired spans interrupted. Dashboard lists use validated keyset pagination and metrics describe the current page.
 
 ## Releases and operations
 

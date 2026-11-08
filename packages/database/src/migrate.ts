@@ -6,6 +6,7 @@ import * as sdkTurns from './migrations/003-sdk-turns.js';
 import * as groupFeedback from './migrations/004-group-feedback.js';
 import * as groupTopicSchedules from './migrations/005-group-topic-schedules.js';
 import * as groupMemoryReview from './migrations/006-group-memory-review.js';
+import * as modelTraces from './migrations/007-model-traces.js';
 import type { Database } from './schema.js';
 
 export async function migrate(db: Kysely<Database>): Promise<void> {
@@ -29,6 +30,7 @@ export async function migrate(db: Kysely<Database>): Promise<void> {
           '004-group-feedback': groupFeedback,
           '005-group-topic-schedules': groupTopicSchedules,
           '006-group-memory-review': groupMemoryReview,
+          '007-model-traces': modelTraces,
         };
       },
     },

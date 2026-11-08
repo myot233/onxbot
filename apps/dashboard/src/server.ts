@@ -3,7 +3,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { TraceBuffer } from './traces.js';
+import { type TraceStore, traceQuerySchema } from '@onxbot/model';
 
 const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -15,9 +15,10 @@ const mime: Record<string, string> = {
 const digest = (text: string) => createHash('sha256').update(text).digest();
 
 export function createDashboardServer(
-  buffer: TraceBuffer,
+  store: Pick<TraceStore, 'list' | 'get'>,
   options: { password?: string | undefined; assetsDir?: string } = {},
 ) {
+  const startedAt = new Date().toISOString();
   const assetsDir =
     options.assetsDir ??
     dirname(fileURLToPath(import.meta.resolve('@onxbot/dashboard/client')));
@@ -61,25 +62,30 @@ export function createDashboardServer(
       json(response, 400, { error: 'Invalid URL' });
       return;
     }
-    if (url.pathname === '/api/traces') {
-      const session = url.searchParams.get('session');
-      const traces = buffer
-        .list()
-        .filter((trace) => !session || trace.session === session)
-        .map(({ events, ...trace }) => ({
-          ...trace,
-          eventCount: events.length,
-        }));
-      json(response, 200, { startedAt: buffer.startedAt, limit: 50, traces });
-      return;
-    }
-    const match = /^\/api\/traces\/(\d+)$/.exec(url.pathname);
-    if (match) {
-      const trace = buffer.get(Number(match[1]));
-      json(
-        response,
-        trace ? 200 : 404,
-        trace ?? { error: 'Trace no longer available' },
+    const api = async () => {
+      if (url.pathname === '/api/traces') {
+        const query = traceQuerySchema.safeParse(
+          Object.fromEntries(url.searchParams),
+        );
+        if (!query.success) {
+          json(response, 400, { error: 'Invalid trace query' });
+          return;
+        }
+        json(response, 200, { startedAt, ...(await store.list(query.data)) });
+        return;
+      }
+      const match = /^\/api\/traces\/(\d+)$/.exec(url.pathname);
+      const id = Number(match?.[1]);
+      if (!match || !Number.isSafeInteger(id) || id < 1 || id > 2_147_483_647) {
+        json(response, 404, { error: 'Trace not found' });
+        return;
+      }
+      const trace = await store.get(id);
+      json(response, trace ? 200 : 404, trace ?? { error: 'Trace not found' });
+    };
+    if (url.pathname.startsWith('/api/')) {
+      void api().catch(() =>
+        json(response, 503, { error: 'Trace storage unavailable' }),
       );
       return;
     }

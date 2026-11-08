@@ -1,10 +1,27 @@
 import type { FeedbackLabel, GroupDecision, GroupLine } from '@onxbot/core';
-import type { ConversationMessage } from '@onxbot/model';
+import type { ConversationMessage, Trace, TraceEvent } from '@onxbot/model';
 import type { ColumnType, Generated, JSONColumnType } from 'kysely';
 
 type Timestamp = ColumnType<Date, Date | string | undefined, Date | string>;
 
 export interface Database {
+  model_traces: {
+    id: Generated<number>;
+    session: string;
+    owner_id: string;
+    lease_until: Timestamp;
+    started_at: Timestamp;
+    finished_at: Timestamp | null;
+    status: Generated<Trace['status']>;
+    truncated: Generated<boolean>;
+    event_count: Generated<number>;
+  };
+  model_trace_events: {
+    trace_id: number;
+    sequence: number;
+    phase: TraceEvent['phase'];
+    content: string;
+  };
   group_memory_schedules: {
     bot_id: string;
     group_id: string;
