@@ -30,6 +30,8 @@ Agent instructions use English with explicit MUST and MUST NOT rules. User-facin
 
 Preserve the configured group allowlists, cooldown, and direct-mention behavior unless the task changes them. The agent can call `send_message` in successive model steps. Native QQ reactions and pokes can complete an interaction. Keep tool targets bound to the current conversation.
 
+Proactive conversation defaults to a concrete contribution: an opinion, grounded detail, association, or light joke. Questions require a specific conversational purpose. Missing memory details and unfinished projects are not a follow-up backlog. Scheduled-turn instructions require one contribution and then waiting for a human; preserve ordinary agent multi-message behavior.
+
 Share memory recording rules between live turns and scheduled reviews through `memory-policy.ts`. Notes distinguish source-message time, event time, and recording time. Attribute facts to the correct speaker, retain valid prior facts, and mark uncertain observations.
 
 Memory requires future conversational value. Skip transient reactions and unexplained fragments; tentative labels do not justify speculation. Social patterns need multiple distinct exchanges. Explicit terminology, preferences, and ongoing projects can be established by one direct statement. Relevant updates consolidate evidence and remove unsupported or obsolete details. Storage owns the single `Recorded at` footer. Normalize only complete, explicitly zoned timestamps and preserve their precision; never invent missing dates or offsets. Preserve quoted text and code examples when cleaning metadata.

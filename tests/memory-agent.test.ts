@@ -423,7 +423,7 @@ it('starts a scheduled topic from restored context without receiving live messag
       expect(JSON.stringify(prompt)).toContain('scheduled_topic');
       expect(JSON.stringify(prompt)).toContain('周二');
       return call('send_message', {
-        text: '说到周二，有人想一起喝咖啡吗？',
+        text: '周二已经有咖啡味了',
       });
     }
     return sdkResult([]);
@@ -441,10 +441,7 @@ it('starts a scheduled topic from restored context without receiving live messag
     await group.initiateTopic('42', saved.slice(0, 1), send);
     expect(step).toBe(0);
     await group.initiateTopic('42', saved, send);
-    expect(send).toHaveBeenCalledExactlyOnceWith(
-      '说到周二，有人想一起喝咖啡吗？',
-      0,
-    );
+    expect(send).toHaveBeenCalledExactlyOnceWith('周二已经有咖啡味了', 0);
   } finally {
     await memory.close();
     await rm(root, { recursive: true, force: true });
