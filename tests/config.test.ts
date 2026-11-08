@@ -9,6 +9,18 @@ const required = {
 };
 
 describe('configuration', () => {
+  it('enables a password-free dashboard unless an explicit password is configured', () => {
+    const config = loadConfig({ ...required, OBSERVE_PORT: '8787' });
+    expect(config.observe).toMatchObject({ host: '127.0.0.1', port: 8787 });
+    expect(config.observe?.password).toBeUndefined();
+    expect(
+      loadConfig({
+        ...required,
+        OBSERVE_PORT: '8787',
+        OBSERVE_PASSWORD: 'optional-dashboard-password-123',
+      }).observe?.password,
+    ).toBe('optional-dashboard-password-123');
+  });
   it('defaults to echo and validates numeric settings', () => {
     const config = loadConfig(required);
     expect(config.provider).toEqual({ type: 'echo' });

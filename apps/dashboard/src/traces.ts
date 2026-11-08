@@ -1,16 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ModelTrace } from '@onxbot/model';
-
-interface Trace {
-  id: number;
-  session: string;
-  startedAt: string;
-  status: '运行中' | '完成' | '失败';
-  events: { phase: 'input' | 'output'; content: string }[];
-  truncated: boolean;
-}
+import type { Trace } from './contract.js';
 
 export class TraceBuffer {
+  readonly startedAt = new Date().toISOString();
   private readonly current = new AsyncLocalStorage<Trace>();
   private readonly recent: Trace[] = [];
   private nextId = 0;
@@ -27,9 +20,11 @@ export class TraceBuffer {
     try {
       const result = await this.current.run(trace, work);
       trace.status = '完成';
+      trace.finishedAt = new Date().toISOString();
       return result;
     } catch (error) {
       trace.status = '失败';
+      trace.finishedAt = new Date().toISOString();
       throw error;
     }
   };
@@ -65,6 +60,10 @@ export class TraceBuffer {
     }
     trace.events.push({ phase, content });
   };
+
+  get(id: number): Trace | undefined {
+    return this.recent.find((trace) => trace.id === id);
+  }
 
   list(): readonly Trace[] {
     return this.recent;

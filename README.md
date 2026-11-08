@@ -115,9 +115,13 @@ OPENAI_MODEL=你的模型名称
 
 ### 会话观测面板
 
-使用真实模型时，在 `.env` 设置 `OBSERVE_PORT=8787` 和独立的 `OBSERVE_PASSWORD`（至少 24 个可打印 ASCII 字符），重启后打开 [本地面板](http://127.0.0.1:8787)，用户名为 `onxbot`。可以按会话筛选，展开每次模型调用实际收到的人格、历史、当前消息和已回填的工具结果，以及该步生成的文本、工具调用和 token 用量。DeepSeek 返回缓存统计时，输出中会显示 `cache.hitTokens` 和 `cache.missTokens`。
+Dashboard 是独立 workspace `@onxbot/dashboard`，使用 React、Vite、Tailwind CSS 和 shadcn/ui。Bot 承载同源只读 API 与构建后的前端，无需另起一个生产服务。在 `.env` 设置 `OBSERVE_PORT=8787` 后打开 [本地面板](http://127.0.0.1:8787)，默认不认证；如需启用 HTTP Basic 认证，可显式配置 `OBSERVE_PASSWORD`（至少 24 个可打印 ASCII 字符），用户名为 `onxbot`。
 
-面板默认关闭。最近 50 个回合只保存在进程内存，重启后清空，过长事件会标记截断。面板可能显示群聊、私聊和记忆正文，只开放给管理员。容器运行时，在 Bot 的环境中设置 `OBSERVE_HOST=0.0.0.0`，将端口发布为 `127.0.0.1:8787:8787`。远程查看可用 `ssh -N -L 8787:127.0.0.1:8787 <服务器>`，然后打开本地面板。
+面板支持会话、状态与编号筛选，每五秒自动刷新且可暂停。选中回合后，可按步骤查看实际模型上下文、人格指令、工具参数与结果，也能查看包含 token 用量、缓存统计的原始事件。API 为 `GET /api/traces`、`GET /api/traces/:id`，列表支持 `?session=` 过滤。默认只显示当前进程保留的最近 50 个回合，重启后清空；过长事件会标记截断。此信息不代表 QQ 在线状态。
+
+不设置 `OBSERVE_PORT` 时面板保持关闭。容器部署时设置 `OBSERVE_HOST=0.0.0.0`，将端口发布为 `127.0.0.1:8787:8787`，通过 `ssh -N -L 8787:127.0.0.1:8787 <服务器>` 访问。面板包含聊天与记忆正文，默认无认证的访问范围由本地绑定或外层代理控制。
+
+前端开发使用 `pnpm --filter @onxbot/dashboard dev`，Vite 将 `/api` 代理到 `127.0.0.1:8787`。`pnpm dev` 同时运行 Bot 与前端开发任务，需要本地 `.env`。生产资源随 `pnpm build` 一并构建并打入镜像。
 
 ### 构建与运行
 
@@ -126,7 +130,7 @@ pnpm build
 pnpm start
 ```
 
-在仓库根目录执行。`dev` 通过 `development` 导出条件直接加载各 workspace 的 TypeScript 源码，修改共享包也会触发重启；`start` 使用编译后的 JavaScript。迁移单独执行，应用启动时检查业务表是否已存在。
+在仓库根目录执行。Turborepo 按 workspace 依赖顺序执行构建和类型检查并缓存产物；`pnpm typecheck` 会先构建依赖和 dashboard 资源，再检查应用与测试。`dev` 通过 `development` 导出条件直接加载各 workspace 的 TypeScript 源码，修改共享包也会触发重启；`start` 使用编译后的 JavaScript。迁移单独执行，应用启动时检查业务表是否已存在。
 
 ## 检查与测试
 

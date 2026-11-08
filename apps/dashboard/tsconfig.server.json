@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "rootDir": "src", "outDir": "dist/server" },
+  "include": ["src/server.ts", "src/traces.ts", "src/contract.ts"],
+  "references": [{ "path": "../../packages/model" }]
+}

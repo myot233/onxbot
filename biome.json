@@ -2,10 +2,33 @@
   "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/dist", "!pnpm-lock.yaml"]
+    "includes": ["**", "!**/dist", "!pnpm-lock.yaml", "!**/.turbo"]
   },
-  "formatter": { "indentStyle": "space", "indentWidth": 2 },
-  "javascript": { "formatter": { "quoteStyle": "single" } },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
-  "assist": { "actions": { "source": { "organizeImports": "on" } } }
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  }
 }

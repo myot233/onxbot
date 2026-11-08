@@ -14,5 +14,9 @@
     "@ai-sdk/openai-compatible": "^3.0.85",
     "ai": "^7.0.163",
     "zod": "^4.6.7"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
   }
 }

@@ -18,5 +18,9 @@
   },
   "devDependencies": {
     "@types/pg": "^8.15.6"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b"
   }
 }
