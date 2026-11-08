@@ -4,6 +4,8 @@ import { createServer, type ServerResponse } from 'node:http';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type TraceStore, traceQuerySchema } from '@onxbot/model';
+import { z } from 'zod';
+import type { MemoryDocuments } from './contract.js';
 
 const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -16,7 +18,11 @@ const digest = (text: string) => createHash('sha256').update(text).digest();
 
 export function createDashboardServer(
   store: Pick<TraceStore, 'list' | 'get'>,
-  options: { password?: string | undefined; assetsDir?: string } = {},
+  options: {
+    password?: string | undefined;
+    assetsDir?: string;
+    memory?: MemoryDocuments;
+  } = {},
 ) {
   const startedAt = new Date().toISOString();
   const assetsDir =
@@ -63,6 +69,35 @@ export function createDashboardServer(
       return;
     }
     const api = async () => {
+      if (
+        url.pathname === '/api/memory' ||
+        url.pathname === '/api/memory/document'
+      ) {
+        if (!options.memory) {
+          json(response, 503, { error: 'Memory browser unavailable' });
+          return;
+        }
+        if (url.pathname === '/api/memory') {
+          json(response, 200, { paths: await options.memory.listDocuments() });
+          return;
+        }
+        const query = z
+          .object({ path: z.string().min(1).max(256) })
+          .safeParse(Object.fromEntries(url.searchParams));
+        if (!query.success) {
+          json(response, 400, { error: 'Invalid document query' });
+          return;
+        }
+        const markdown = await options.memory.readDocument(query.data.path);
+        json(
+          response,
+          markdown === undefined ? 404 : 200,
+          markdown === undefined
+            ? { error: 'Document not found' }
+            : { path: query.data.path, markdown },
+        );
+        return;
+      }
       if (url.pathname === '/api/traces') {
         const query = traceQuerySchema.safeParse(
           Object.fromEntries(url.searchParams),
@@ -85,7 +120,7 @@ export function createDashboardServer(
     };
     if (url.pathname.startsWith('/api/')) {
       void api().catch(() =>
-        json(response, 503, { error: 'Trace storage unavailable' }),
+        json(response, 503, { error: 'Observation storage unavailable' }),
       );
       return;
     }

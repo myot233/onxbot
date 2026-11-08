@@ -968,3 +968,221 @@ h1 {
   color: #63716b;
   font-size: 11px;
 }
+
+.page-navigation {
+  display: flex;
+  gap: 8px;
+}
+.page-navigation a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border-radius: 7px;
+  color: #63716b;
+  font-size: 12px;
+  text-decoration: none;
+}
+.page-navigation a[aria-current="page"] {
+  background: #edf4ee;
+  color: #2d5a3d;
+  font-weight: 600;
+}
+.page-navigation svg {
+  width: 15px;
+  height: 15px;
+}
+.memory-page main {
+  max-width: 1440px;
+  margin-inline: auto;
+}
+.memory-layout {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.memory-list-card,
+.memory-document-card {
+  padding: 0;
+  gap: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.memory-list-card h2 {
+  font-size: 14px;
+  margin-bottom: 14px;
+}
+.memory-folders {
+  padding: 8px;
+  max-height: 65vh;
+  overflow-y: auto;
+}
+.memory-folders h3 {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 14px 8px 6px;
+  font-size: 11px;
+  color: #63716b;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+.memory-folders svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.memory-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  min-height: 36px;
+  border-radius: 6px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.memory-file:hover {
+  background: #f8faf8;
+}
+.memory-file.selected {
+  background: #edf4ee;
+  color: #2d5a3d;
+}
+.memory-document-card h2 {
+  overflow-wrap: anywhere;
+}
+.memory-path {
+  overflow-wrap: anywhere;
+}
+.memory-tabs {
+  gap: 0;
+}
+.memory-tabs > [data-slot="tabs-list"] {
+  margin: 0 24px 12px;
+}
+.markdown-document {
+  padding: 16px 28px 32px;
+  font-size: 14px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.markdown-document :is(h3, h4, h5, h6) {
+  font-weight: 650;
+  line-height: 1.5;
+  margin: 22px 0 12px;
+}
+.markdown-document h3 {
+  font-size: 22px;
+}
+.markdown-document h4 {
+  font-size: 18px;
+}
+.markdown-document :is(p, ul, ol, pre, blockquote, table) {
+  margin-block: 12px;
+}
+.markdown-document ul {
+  list-style: disc;
+  padding-left: 24px;
+}
+.markdown-document ol {
+  list-style: decimal;
+  padding-left: 24px;
+}
+.markdown-document a {
+  color: #276443;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.markdown-document blockquote {
+  border-left: 3px solid #becfc3;
+  padding-left: 16px;
+  color: #63716b;
+}
+.markdown-document pre {
+  overflow-x: auto;
+  background: #f4f6f5;
+  border-radius: 8px;
+  padding: 16px;
+}
+.markdown-document code {
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.markdown-document :not(pre) > code {
+  background: #f0f3f2;
+  padding: 2px 5px;
+  border-radius: 4px;
+}
+.markdown-document table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+.markdown-document :is(th, td) {
+  border: 1px solid #d9e1dd;
+  padding: 7px 12px;
+}
+.markdown-document .task-list-item {
+  list-style: none;
+}
+.memory-source {
+  margin: 0 24px 24px;
+  max-height: 70vh;
+  overflow: auto;
+}
+.memory-image-placeholder {
+  color: #63716b;
+  font-size: 12px;
+}
+.memory-placeholder {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px;
+  text-align: center;
+}
+.memory-placeholder > svg {
+  color: #63716b;
+}
+.memory-placeholder h2 {
+  font-size: 18px;
+}
+.memory-placeholder p {
+  color: #63716b;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  .memory-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .memory-folders {
+    max-height: 260px;
+  }
+  .markdown-document {
+    padding: 12px 18px 24px;
+  }
+  .memory-page .topbar {
+    padding-inline: 12px;
+  }
+}
+.memory-list-card .filters {
+  display: grid;
+  gap: 8px;
+}
+.memory-list-card select {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  font-size: 12px;
+}

@@ -5,7 +5,6 @@ import {
   ArrowUpRight,
   Braces,
   Check,
-  ChevronRight,
   CircleDot,
   Clock3,
   Layers3,
@@ -18,13 +17,14 @@ import {
   Terminal,
   Wrench,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { z } from 'zod';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { load } from '@/lib/api';
 import {
   modelInputSchema,
   modelOutputSchema,
@@ -33,6 +33,7 @@ import {
   traceIndexSchema,
   traceSchema,
 } from '../contract';
+import { DashboardNavigation } from './navigation';
 
 const initial = new URLSearchParams(window.location.search);
 const time = new Intl.DateTimeFormat('zh-CN', {
@@ -73,20 +74,6 @@ function kind(value: string) {
     : value.includes('/group/')
       ? '群聊'
       : '对话';
-}
-async function load<T>(
-  path: string,
-  schema: z.ZodType<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  const response = await fetch(path, { signal, cache: 'no-store' });
-  if (!response.ok)
-    throw new Error(
-      response.status === 404
-        ? '该回合不存在 请重新选择'
-        : `无法读取观测数据（${response.status}）`,
-    );
-  return schema.parse(await response.json());
 }
 function Status({ status }: { status: TraceSummary['status'] }) {
   return (
@@ -349,7 +336,29 @@ function Detail({ trace }: { trace: Trace }) {
     </Card>
   );
 }
+const MemoryBrowser = lazy(() =>
+  import('./memory-browser').then((module) => ({
+    default: module.MemoryBrowser,
+  })),
+);
+
 export function App() {
+  return new URLSearchParams(window.location.search).get('view') ===
+    'memory' ? (
+    <Suspense
+      fallback={
+        <main>
+          <h1>正在打开记忆文档</h1>
+        </main>
+      }
+    >
+      <MemoryBrowser />
+    </Suspense>
+  ) : (
+    <TraceDashboard />
+  );
+}
+function TraceDashboard() {
   const [auto, setAuto] = useState(true);
   const [session, setSession] = useState(initial.get('session') ?? '');
   const [selected, setSelected] = useState<number | undefined>(
@@ -473,11 +482,7 @@ export function App() {
       </aside>
       <div className="main-shell">
         <header className="topbar">
-          <span className="breadcrumb">
-            工作空间
-            <ChevronRight aria-hidden="true" />
-            <span>会话追踪</span>
-          </span>
+          <DashboardNavigation current="traces" />
           <span className="connection">
             <span
               className={`connection-dot ${index.isError ? 'offline' : ''}`}

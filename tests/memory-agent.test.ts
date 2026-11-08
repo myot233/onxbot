@@ -119,6 +119,8 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
     await expect(
       readFile(join(root, 'group/42/会议.md'), 'utf8'),
     ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await memory.listDocuments()).toContain('group/42/会议.md');
+    expect(await memory.readDocument('group/42/会议.md')).toContain('周二见。');
     await expect(turn).resolves.toEqual({
       reply: '周二见。',
       messages: [{ role: 'assistant', content: '周二见。' }],

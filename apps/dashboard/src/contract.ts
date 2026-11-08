@@ -1,6 +1,16 @@
 import { tracePageSchema } from '@onxbot/model';
 import { z } from 'zod';
 
+export const memoryIndexSchema = z.object({ paths: z.array(z.string()) });
+export const memoryDocumentSchema = z.object({
+  path: z.string(),
+  markdown: z.string(),
+});
+export interface MemoryDocuments {
+  listDocuments(): Promise<string[]>;
+  readDocument(path: string): Promise<string | undefined>;
+}
+
 export type { Trace, TraceSummary } from '@onxbot/model';
 export { traceSchema } from '@onxbot/model';
 export const traceIndexSchema = tracePageSchema.extend({

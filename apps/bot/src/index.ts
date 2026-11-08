@@ -36,14 +36,17 @@ async function main(): Promise<void> {
       error instanceof Error ? error.message : 'unknown error',
     ),
   );
-  const panel =
-    config.observe &&
-    createDashboardServer(traceStore, { password: config.observe.password });
   const model = createModelProvider(config.provider, traces.record);
   const runner = new TurnRunner(model);
   const memory = new MarkdownMemory(config.memoryDir, (error) =>
     console.warn('Memory write failed:', error),
   );
+  const panel =
+    config.observe &&
+    createDashboardServer(traceStore, {
+      password: config.observe.password,
+      memory,
+    });
   const agent =
     config.provider.type === 'echo'
       ? undefined
