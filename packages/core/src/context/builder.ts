@@ -8,6 +8,8 @@ import { takeRight } from 'lodash-es';
 import type { ConversationIdentity } from '../conversation/types.js';
 import { ChatInputError } from '../errors.js';
 import { chatTimestamp } from '../time.js';
+import type { ChatImage } from '../types.js';
+import { buildChatContent } from './chat-content.js';
 
 export interface ContextRequest {
   identity: ConversationIdentity;
@@ -58,6 +60,7 @@ export class ContextBuilder {
     request: ContextRequest & {
       history: readonly ConversationMessage[];
       sentAt?: string | undefined;
+      images?: readonly ChatImage[] | undefined;
     },
   ): Promise<PreparedContext> {
     const prefix: ModelMessage[] = [
@@ -110,7 +113,10 @@ export class ContextBuilder {
             },
           ]
         : []),
-      { role: 'user', content: request.input },
+      {
+        role: 'user',
+        content: await buildChatContent(request.input, request.images),
+      },
     ];
     const budget = this.options.budget;
     return {

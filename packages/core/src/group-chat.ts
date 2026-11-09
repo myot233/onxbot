@@ -1,8 +1,10 @@
 import type { ModelMessage, ModelProvider } from '@onxbot/model';
+import { buildChatContent } from './context/chat-content.js';
 import type { MemoryScope } from './memory.js';
 import { chatTimestamp } from './time.js';
 import type { ConversationAgent } from './turn/agent.js';
 import type { Tool } from './turn/tools.js';
+import { type ChatImage, maxChatImages } from './types.js';
 
 const historyLimit = 16;
 const decisionIntervalMs = 3 * 60_000;
@@ -29,6 +31,7 @@ export interface GroupMessage extends GroupLine {
   roomId: string;
   userId?: string;
   addressedTo: 'bot' | 'someone-else' | 'group';
+  images?: readonly ChatImage[];
 }
 
 export function prepareGroupLine(message: GroupMessage): GroupLine {
@@ -65,6 +68,7 @@ export interface GroupDecision {
 
 export class GroupChat {
   private readonly rooms = new Map<string, GroupRoom>();
+  private readonly images = new WeakMap<GroupLine, readonly ChatImage[]>();
 
   constructor(
     private readonly model: ModelProvider,
@@ -83,6 +87,8 @@ export class GroupChat {
   ): Promise<void> {
     const room = this.getRoom(message.roomId);
     const line = prepareGroupLine(message);
+    if (message.images?.length)
+      this.images.set(line, message.images.slice(0, maxChatImages));
     appendGroupLine(room.lines, line);
 
     const direct = message.addressedTo === 'bot';
@@ -173,6 +179,23 @@ export class GroupChat {
       .catch(() => {})
       .then(async () => {
         const tools = options.tools?.() ?? [];
+        const recentImages = new Set(
+          decision.context
+            .flatMap((line) => this.images.get(line) ?? [])
+            .slice(-maxChatImages),
+        );
+        const entries = await Promise.all(
+          decision.context.map(async (line): Promise<ModelMessage[]> => {
+            const { text, ...metadata } = renderGroupLine(line);
+            const images = this.images
+              .get(line)
+              ?.filter((image) => recentImages.has(image));
+            return [
+              { role: 'user', content: JSON.stringify(metadata) },
+              { role: 'user', content: await buildChatContent(text, images) },
+            ];
+          }),
+        );
         const messages: ModelMessage[] = [
           {
             role: 'system',
@@ -199,13 +222,7 @@ export class GroupChat {
                 : []),
             ].join('\n'),
           },
-          ...decision.context.flatMap((line): ModelMessage[] => {
-            const { text, ...metadata } = renderGroupLine(line);
-            return [
-              { role: 'user', content: JSON.stringify(metadata) },
-              { role: 'user', content: text },
-            ];
-          }),
+          ...entries.flat(),
         ];
         if (trigger === 'topic')
           messages.push({

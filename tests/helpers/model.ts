@@ -7,6 +7,11 @@ import {
 type Generate = MockLanguageModelV4['doGenerate'];
 type Generated = Awaited<ReturnType<Generate>>;
 
+export const samplePng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7p8AAAAASUVORK5CYII=',
+  'base64',
+);
+
 export function sdkModel(
   generate: (
     options: Parameters<Generate>[0],

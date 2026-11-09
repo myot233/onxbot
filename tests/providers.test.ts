@@ -5,6 +5,7 @@ import { tool } from 'ai';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createModelProvider } from '../packages/model/src/index.js';
+import { samplePng } from './helpers/model.js';
 
 describe('chat providers', () => {
   it('echo returns the latest user message', async () => {
@@ -22,6 +23,7 @@ describe('chat providers', () => {
   it('sends ordered context and authorization to an OpenAI-compatible endpoint', async () => {
     let payload: unknown;
     let authorization: string | undefined;
+    const inputTraces: unknown[] = [];
     const outputTraces: unknown[] = [];
     const server = createServer(async (request, response) => {
       authorization = request.headers.authorization;
@@ -55,6 +57,7 @@ describe('chat providers', () => {
           timeoutMs: 1000,
         },
         ({ phase, data }) => {
+          if (phase === 'input') inputTraces.push(data);
           if (phase === 'output') outputTraces.push(data);
         },
       );
@@ -72,6 +75,46 @@ describe('chat providers', () => {
       expect(outputTraces).toMatchObject([
         { cache: { hitTokens: 128, missTokens: 2 } },
       ]);
+
+      await provider.generate({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '看看这张图' },
+              { type: 'file', mediaType: 'image/png', data: samplePng },
+            ],
+          },
+        ],
+      });
+      expect(payload).toMatchObject({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '看看这张图' },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:image/png;base64,${samplePng.toString('base64')}`,
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(inputTraces.at(-1)).toMatchObject({
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: '看看这张图' },
+              { type: 'file', mediaType: 'image/png', redacted: true },
+            ],
+          },
+        ],
+      });
+      expect(JSON.stringify(inputTraces.at(-1))).not.toMatch(/"data"|iVBOR/);
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>

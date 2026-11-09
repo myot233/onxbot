@@ -16,6 +16,7 @@ import {
   type Tool,
 } from '@onxbot/core';
 import type { Context, Session } from 'koishi';
+import { chatImages } from './images.js';
 import { startTopicCron } from './topic-cron.js';
 
 const { Argv, h } = createRequire(import.meta.url)(
@@ -213,14 +214,18 @@ export function apply(context: Context, config: Config): void {
         }
         return;
       }
-      if (text.startsWith('/') || (!text && !direct && !forwarded)) return;
+      if (text.startsWith('/')) return;
+      const images = chatImages(session);
+      if (!text && !direct && !forwarded && !images.length) return;
       const quoteElements = session.quote?.elements ?? [];
-      const quote =
+      const quote = withImageMarker(
         plainText(quoteElements) ||
-        (groupTools &&
-        quoteElements.some((element) => element.type === 'forward')
-          ? '[Forwarded QQ message]'
-          : '');
+          (groupTools &&
+          quoteElements.some((element) => element.type === 'forward')
+            ? '[Forwarded QQ message]'
+            : ''),
+        quoteElements.some((element) => element.type === 'img'),
+      );
       const messageId = session.messageId;
       const quoteId = session.quote?.messageId;
       const groupMessage: GroupMessage = {
@@ -228,13 +233,18 @@ export function apply(context: Context, config: Config): void {
         userId,
         speaker: session.username || userId,
         sentAt: sessionTimestamp(session),
-        text: text || (forwarded ? '[Forwarded QQ message]' : '（叫了你）'),
+        text:
+          withImageMarker(
+            text,
+            images.some((image) => !image.quoted),
+          ) || (forwarded ? '[Forwarded QQ message]' : '（叫了你）'),
         addressedTo: direct
           ? 'bot'
           : mentions.length || session.quote
             ? 'someone-else'
             : 'group',
         ...(quote && { quote }),
+        ...(images.length && { images }),
       };
       const trackTopic = topicGroups.has(guildId);
       if (trackTopic || reviewGroups.has(guildId))
@@ -308,9 +318,13 @@ export function apply(context: Context, config: Config): void {
     });
   }
   context.before('parse', (content, session) => {
-    const chat = /^chat(?:\s+([\s\S]*))?$/i.exec(content);
+    const chat = /^chat(?:(?:\s+|(?=<img\b))([\s\S]*))?$/i.exec(content);
     if (session.stripped.prefix === null || !chat) return Argv.parse(content);
-    return { name: 'chat', args: [h.unescape(chat[1] ?? '')], options: {} };
+    let body = chat[1] ?? '';
+    for (const element of session.elements ?? []) {
+      if (element.type === 'img') body = body.replace(element.toString(), '');
+    }
+    return { name: 'chat', args: [h.unescape(body)], options: {} };
   });
   const execute = async (
     session: Session | undefined,
@@ -359,7 +373,10 @@ export function apply(context: Context, config: Config): void {
               roomId: scope.id,
               userId: identity.userId,
               speaker: session?.username || identity.userId,
-              text: request.text,
+              text: withImageMarker(
+                request.text,
+                Boolean(request.images?.length),
+              ),
               addressedTo: 'bot',
               sentAt: sessionTimestamp(session),
             }),
@@ -386,9 +403,14 @@ export function apply(context: Context, config: Config): void {
 
   context
     .command('chat [text:text]', '与机器人对话')
-    .action(({ session }, text) =>
-      execute(session, { type: 'chat', text: text ?? '' }),
-    );
+    .action(({ session }, text) => {
+      const images = chatImages(session);
+      return execute(session, {
+        type: 'chat',
+        text: text ?? '',
+        ...(images.length && { images }),
+      });
+    });
   context
     .command('reset', '清空你在当前频道的对话上下文')
     .action(({ session }) => execute(session, { type: 'reset' }));
@@ -400,4 +422,8 @@ function plainText(elements: NonNullable<Session['elements']>): string {
     .map((element) => element.attrs.content)
     .join('')
     .trim();
+}
+
+function withImageMarker(text: string, hasImage: boolean): string {
+  return hasImage ? [text.trim(), '[图片]'].filter(Boolean).join(' ') : text;
 }

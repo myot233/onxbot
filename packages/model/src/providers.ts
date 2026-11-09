@@ -10,7 +10,6 @@ import { userMessageRoleSchema } from './message-schemas.js';
 import type { ModelProvider, ModelTrace } from './types.js';
 
 const toolErrorPartSchema = z.object({ type: z.literal('tool-error') });
-const echoContentSchema = z.string().catch('');
 const assistantPartsSchema = z.looseObject({
   role: z.literal('assistant'),
   content: z.array(z.looseObject({ type: z.string() })),
@@ -68,6 +67,27 @@ export function createSdkModelProvider(
                   modelId,
                   instructions,
                   messages: messages.map((message) => {
+                    if (
+                      message.role === 'user' &&
+                      Array.isArray(message.content)
+                    )
+                      return {
+                        ...message,
+                        content: message.content.map((part) => {
+                          if (
+                            part.type === 'image' ||
+                            (part.type === 'file' &&
+                              (part.mediaType === 'image' ||
+                                part.mediaType.startsWith('image/')))
+                          )
+                            return {
+                              type: part.type,
+                              mediaType: part.mediaType,
+                              redacted: true,
+                            };
+                          return part;
+                        }),
+                      };
                     const parsed = assistantPartsSchema.safeParse(message);
                     if (!parsed.success) return message;
                     return {
@@ -181,7 +201,15 @@ export function createModelProvider(
         const latest = messages.findLast(
           (message) => userMessageRoleSchema.safeParse(message).success,
         );
-        const text = `收到：${echoContentSchema.parse(latest?.content)}`;
+        const content = latest?.role === 'user' ? latest.content : '';
+        const input =
+          typeof content === 'string'
+            ? content
+            : content
+                .filter((part) => part.type === 'text')
+                .map((part) => part.text)
+                .join('\n');
+        const text = `收到：${input}`;
         return { text, messages: [{ role: 'assistant', content: text }] };
       },
     };
