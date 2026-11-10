@@ -4,7 +4,7 @@ import type { ConversationService } from './conversation/service.js';
 import { ChatInputError } from './errors.js';
 import type { ConversationAgent } from './turn/agent.js';
 import type { TurnRunner } from './turn/runner.js';
-import type { ChatRequest } from './types.js';
+import { type ChatRequest, maxChatImages } from './types.js';
 
 export class ChatService {
   constructor(
@@ -25,9 +25,9 @@ export class ChatService {
       })
       .with(
         { type: 'chat' },
-        async ({ identity, text, memoryScope, sentAt }) => {
+        async ({ identity, text, images, memoryScope, sentAt }) => {
           const input = text.trim();
-          if (!input)
+          if (!input && !images?.length)
             throw new ChatInputError('请输入对话内容，例如：/chat 你好');
           if (input.length > this.modules.maxInputChars) {
             throw new ChatInputError(
@@ -37,7 +37,9 @@ export class ChatService {
           return this.modules.conversations.reply(
             {
               identity,
-              input,
+              input: images?.length
+                ? [input, '[图片]'].filter(Boolean).join(' ')
+                : input,
               sentAt,
               historyTurns: this.modules.context.historyTurns,
             },
@@ -47,6 +49,7 @@ export class ChatService {
                 input,
                 sentAt,
                 history,
+                images: images?.slice(0, maxChatImages),
               });
               return this.modules.agent && memoryScope
                 ? this.modules.agent.run(context, memoryScope)

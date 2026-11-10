@@ -15,7 +15,7 @@ import {
 } from '../packages/model/src/index.js';
 import { createChat } from './helpers/chat.js';
 import { createTestDatabase } from './helpers/database.js';
-import { textReply } from './helpers/model.js';
+import { samplePng, textReply } from './helpers/model.js';
 
 describe('headless Koishi with OneBot v11', () => {
   let fixture: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -63,6 +63,8 @@ describe('headless Koishi with OneBot v11', () => {
       feedback,
     );
     const { context } = runtime;
+    const imageUrl = 'https://multimedia.nt.qq.com.cn/download?fileid=test';
+    const image = { type: 'image', data: { file: 'test.png', url: imageUrl } };
     const replies: Array<{
       user_id?: number;
       group_id?: number;
@@ -84,7 +86,10 @@ describe('headless Koishi with OneBot v11', () => {
             message_type: 'group',
             group_id: 30000,
             sender: { user_id: 10000, nickname: 'onxbot' },
-            message: [{ type: 'text', data: { text: '刚才说过的事' } }],
+            message:
+              String(message.params.message_id) === '91'
+                ? [image]
+                : [{ type: 'text', data: { text: '刚才说过的事' } }],
           };
         if (
           message.action === 'send_private_msg' ||
@@ -118,7 +123,12 @@ describe('headless Koishi with OneBot v11', () => {
       const [socket, request] = await connection;
       expect(request.headers.authorization).toBe('Bearer test-token');
       await online;
-      const send = async (text: string, id: number) => {
+      const send = async (
+        text: string,
+        id: number,
+        attachments: unknown[] = [],
+        prefix: unknown[] = [],
+      ) => {
         const sent = new Promise<void>((resolve) => {
           notifyReply = resolve;
         });
@@ -132,7 +142,11 @@ describe('headless Koishi with OneBot v11', () => {
             message_id: id,
             user_id: 20000,
             sender: { user_id: 20000, nickname: 'Alice' },
-            message: [{ type: 'text', data: { text } }],
+            message: [
+              ...prefix,
+              { type: 'text', data: { text } },
+              ...attachments,
+            ],
             raw_message: text,
           }),
         );
@@ -317,6 +331,77 @@ describe('headless Koishi with OneBot v11', () => {
       ).toEqual([{ label: 'wrong' }]);
       expect(context.get('console')).toBeUndefined();
       expect(context.get('server')).toBeUndefined();
+
+      const fetchImage = vi.spyOn(globalThis, 'fetch');
+      fetchImage.mockImplementation(
+        async () =>
+          new Response(new Uint8Array(samplePng), {
+            headers: { 'content-type': 'application/octet-stream' },
+          }),
+      );
+      try {
+        await send('/chat', 9, [image]);
+        expect(replies.at(-1)?.message).toEqual([
+          { type: 'text', data: { text: '收到：[图片]' } },
+        ]);
+        const saved = await fixture.db
+          .selectFrom('conversation_turns')
+          .select('messages')
+          .orderBy('id', 'desc')
+          .executeTakeFirstOrThrow();
+        expect(saved.messages[0]?.content).toBe('[图片]');
+        await send('/chat', 10, [], [{ type: 'reply', data: { id: '91' } }]);
+        expect(replies.at(-1)?.message).toEqual([
+          { type: 'text', data: { text: '收到：[引用图片]' } },
+        ]);
+
+        sendGroup(30000, 20000, '', [image]);
+        const imageReply = new Promise<void>((resolve) => {
+          notifyReply = resolve;
+        });
+        sendGroup(30000, 20000, '这是什么', mention);
+        await imageReply;
+        const imagePart = {
+          type: 'file',
+          mediaType: 'image/png',
+          data: samplePng,
+        };
+        expect(groupCalls.at(-1)?.messages).toContainEqual({
+          role: 'user',
+          content: expect.arrayContaining([imagePart]),
+        });
+
+        const quotedImageReply = new Promise<void>((resolve) => {
+          notifyReply = resolve;
+        });
+        sendGroup(30000, 20001, '帮我看看', [
+          { type: 'reply', data: { id: '91' } },
+        ]);
+        await quotedImageReply;
+        expect(groupCalls.at(-1)?.messages.at(-1)?.content).toEqual([
+          { type: 'text', text: '帮我看看' },
+          { type: 'text', text: '[引用图片]' },
+          imagePart,
+        ]);
+        expect(
+          fetchImage.mock.calls.every(([url]) => String(url) === imageUrl),
+        ).toBe(true);
+        fetchImage.mockClear();
+        await send('/chat 这张图', 11, [
+          {
+            type: 'image',
+            data: {
+              url: 'https://multimedia.nt.qq.com.cn.example.com/test.png',
+            },
+          },
+        ]);
+        expect(fetchImage).not.toHaveBeenCalled();
+        expect(replies.at(-1)?.message).toMatchObject([
+          { type: 'text', data: { text: '收到：这张图\n[图片无法读取]' } },
+        ]);
+      } finally {
+        fetchImage.mockRestore();
+      }
     } finally {
       await runtime.stop();
       for (const client of server.clients) client.terminate();

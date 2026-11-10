@@ -12,4 +12,4 @@ export * from './time.js';
 export * from './turn/agent.js';
 export * from './turn/runner.js';
 export * from './turn/tools.js';
-export type * from './types.js';
+export * from './types.js';

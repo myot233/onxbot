@@ -1,6 +1,7 @@
 import type { ModelMessage, ToolSet } from 'ai';
 
 export type { ModelMessage } from 'ai';
+export type UserContent = Extract<ModelMessage, { role: 'user' }>['content'];
 export type TurnMessage = Extract<ModelMessage, { role: 'assistant' | 'tool' }>;
 export type ConversationMessage = Exclude<ModelMessage, { role: 'system' }> & {
   sentAt?: string;
