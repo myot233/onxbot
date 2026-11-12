@@ -1,10 +1,13 @@
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tool } from 'ai';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { createModelProvider } from '../packages/model/src/index.js';
+import { defineTool } from '../packages/core/src/index.js';
+import {
+  createModelProvider,
+  type ModelMessage,
+} from '../packages/model/src/index.js';
 import { samplePng } from './helpers/model.js';
 
 describe('chat providers', () => {
@@ -115,6 +118,65 @@ describe('chat providers', () => {
         ],
       });
       expect(JSON.stringify(inputTraces.at(-1))).not.toMatch(/"data"|iVBOR/);
+
+      const history: ModelMessage[] = [
+        { role: 'user', content: '上一轮' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'historical reasoning' },
+            {
+              type: 'tool-call',
+              toolCallId: 'old-call',
+              toolName: 'probe',
+              input: { query: 'old' },
+              providerOptions: {
+                onxbot: { thoughtSignature: 'historical signature' },
+              },
+            },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              toolCallId: 'old-call',
+              toolName: 'probe',
+              output: { type: 'text', value: '旧工具结果' },
+            },
+          ],
+        },
+        { role: 'assistant', content: '上一轮回复' },
+        { role: 'user', content: '继续' },
+      ];
+      await provider.generate({ messages: history });
+      expect(payload).toMatchObject({
+        messages: [
+          history[0],
+          {
+            role: 'assistant',
+            content: null,
+            reasoning_content: 'historical reasoning',
+            tool_calls: [
+              {
+                id: 'old-call',
+                type: 'function',
+                function: { name: 'probe', arguments: '{"query":"old"}' },
+                extra_content: {
+                  google: { thought_signature: 'historical signature' },
+                },
+              },
+            ],
+          },
+          { role: 'tool', tool_call_id: 'old-call', content: '旧工具结果' },
+          history[3],
+          history[4],
+        ],
+      });
+      expect(JSON.stringify(inputTraces.at(-1))).not.toMatch(
+        /historical reasoning|historical signature/,
+      );
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
@@ -177,9 +239,14 @@ it('replays DeepSeek reasoning between tool steps and redacts it from observatio
       await provider.generate({
         messages: [{ role: 'user', content: 'Run the probe.' }],
         maxSteps: 3,
-        tools: {
-          probe: tool({ inputSchema: z.object({}), execute: async () => 'ok' }),
-        },
+        tools: [
+          defineTool({
+            name: 'probe',
+            description: 'Probe',
+            input: z.object({}),
+            execute: async () => 'ok',
+          }),
+        ],
       }),
     ).toMatchObject({ text: 'OK' });
     expect(requests).toHaveLength(2);

@@ -1,15 +1,61 @@
-import type { ModelMessage, ToolSet } from 'ai';
+import type { AgentTool } from '@earendil-works/pi-agent-core';
 
-export type { ModelMessage } from 'ai';
-export type UserContent = Extract<ModelMessage, { role: 'user' }>['content'];
-export type TurnMessage = Extract<ModelMessage, { role: 'assistant' | 'tool' }>;
+interface TextPart {
+  type: 'text';
+  text: string;
+}
+
+export type UserContent =
+  | string
+  | (
+      | TextPart
+      | { type: 'file'; mediaType: string; data: Uint8Array | string }
+    )[];
+
+type AssistantMessage = {
+  role: 'assistant';
+  content:
+    | string
+    | (
+        | TextPart
+        | { type: 'reasoning'; text: string }
+        | {
+            type: 'tool-call';
+            toolName: string;
+            toolCallId: string;
+            input: unknown;
+            providerOptions?: {
+              google?: { thoughtSignature?: string };
+              onxbot?: { thoughtSignature?: string };
+            };
+          }
+      )[];
+};
+
+type ToolMessage = {
+  role: 'tool';
+  content: {
+    type: 'tool-result';
+    toolName: string;
+    toolCallId: string;
+    output: { type: 'text' | 'error-text'; value: string };
+  }[];
+};
+
+export type TurnMessage = AssistantMessage | ToolMessage;
+export type ModelMessage =
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: UserContent }
+  | TurnMessage;
 export type ConversationMessage = Exclude<ModelMessage, { role: 'system' }> & {
   sentAt?: string;
 };
 
+export type ModelTool = AgentTool;
+
 export interface ModelRequest {
   messages: readonly ModelMessage[];
-  tools?: ToolSet;
+  tools?: readonly ModelTool[];
   maxSteps?: number;
   prepareMessages?: (output: readonly TurnMessage[]) => readonly ModelMessage[];
 }

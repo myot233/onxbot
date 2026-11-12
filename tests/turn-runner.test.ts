@@ -5,7 +5,7 @@ import {
   defineTool,
   TurnRunner,
 } from '../packages/core/src/index.js';
-import { sdkModel, sdkResult } from './helpers/model.js';
+import { piModel, piResult } from './helpers/model.js';
 
 async function context() {
   return new ContextBuilder({
@@ -19,15 +19,15 @@ async function context() {
 }
 
 function callWeather(input: string) {
-  return sdkResult(
+  return piResult(
     [{ type: 'tool-call', toolCallId: 'c1', toolName: 'weather', input }],
     'tool-calls',
   );
 }
 
 describe('model and tool execution', () => {
-  it('executes validated tools and stores the SDK transcript', async () => {
-    const model = sdkModel(({ prompt, tools }) => {
+  it('executes validated tools and keeps the stored transcript format', async () => {
+    const model = piModel(({ prompt, tools }) => {
       expect(tools?.[0]).toMatchObject({ name: 'weather' });
       const last = prompt.at(-1);
       if (last?.role !== 'tool') return callWeather('{"city":"Hangzhou"}');
@@ -37,7 +37,7 @@ describe('model and tool execution', () => {
         toolName: 'weather',
         output: { type: 'text', value: 'Hangzhou: sunny' },
       });
-      return sdkResult([{ type: 'text', text: 'forecast: Hangzhou: sunny' }]);
+      return piResult([{ type: 'text', text: 'forecast: Hangzhou: sunny' }]);
     });
     const runner = new TurnRunner(model, {
       tools: [
@@ -82,8 +82,12 @@ describe('model and tool execution', () => {
 
   it('rejects invalid arguments before executing a tool', async () => {
     let executed = false;
+    let calls = 0;
     const runner = new TurnRunner(
-      sdkModel(() => callWeather('{"city":42}')),
+      piModel(() => {
+        calls += 1;
+        return callWeather('{"city":42}');
+      }),
       {
         tools: [
           defineTool({
@@ -98,14 +102,21 @@ describe('model and tool execution', () => {
         ],
       },
     );
-    await expect(runner.run(await context())).rejects.toThrow();
+    await expect(runner.run(await context())).rejects.toThrow(
+      'Model tool execution failed.',
+    );
     expect(executed).toBe(false);
+    expect(calls).toBe(1);
   });
 
   it('stops at the model call limit before executing another tool', async () => {
     let executions = 0;
+    const advertisedTools: string[][] = [];
     const runner = new TurnRunner(
-      sdkModel(() => callWeather('{}')),
+      piModel(({ tools }) => {
+        advertisedTools.push(tools.map(({ name }) => name));
+        return callWeather('{}');
+      }),
       {
         maxModelCalls: 2,
         tools: [
@@ -122,8 +133,9 @@ describe('model and tool execution', () => {
       },
     );
     await expect(runner.run(await context())).rejects.toThrow(
-      'tool choice was none',
+      'Model call limit reached.',
     );
     expect(executions).toBe(1);
+    expect(advertisedTools).toEqual([['weather'], []]);
   });
 });

@@ -15,7 +15,7 @@ import {
 } from '../packages/model/src/index.js';
 import { createChat } from './helpers/chat.js';
 import { createTestDatabase } from './helpers/database.js';
-import { sdkModel, sdkResult, textReply } from './helpers/model.js';
+import { piModel, piResult, textReply } from './helpers/model.js';
 
 describe('PostgreSQL 18 conversation persistence', () => {
   let fixture: Awaited<ReturnType<typeof createTestDatabase>>;
@@ -384,9 +384,9 @@ describe('PostgreSQL 18 conversation persistence', () => {
     let calls = 0;
     const chat = createChat(
       createConversationStore(fixture.db),
-      sdkModel(() => {
+      piModel(() => {
         if (calls++ > 0) throw new Error('final request failed');
-        return sdkResult(
+        return piResult(
           [
             {
               type: 'tool-call',

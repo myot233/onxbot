@@ -26,7 +26,7 @@ flowchart TD
 | `core/conversation`  | `reply(request, generate)`、`reset(identity)` | 在会话锁内读取历史、执行当前回合、原子保存成功回合；失败不保存半个回合     |
 | `core/context`       | `build(request)` → `PreparedContext`          | 组合人格、上下文来源、完整历史回合和当前输入；每次模型请求前重新应用预算   |
 | `core/turn`          | `run(context)` → `TurnResult`                 | 请求模型，执行已注册工具，追加工具结果，继续请求直到最终文本或达到次数限制 |
-| `model`              | `ModelProvider.generate(request)`             | 用 Vercel AI SDK 请求模型、执行工具并返回完整的 SDK 消息                   |
+| `model`              | `ModelProvider.generate(request)`             | 用 Pi Agent Core 运行工具循环，将模型与工具消息转换为会话格式              |
 | `database`           | `ConversationStore.withConversation()`        | 实现会话锁、事务、完整回合查询和消息持久化                                 |
 
 ## 一次回合的执行
@@ -36,8 +36,8 @@ flowchart TD
 3. 存储锁定当前身份，读取最近 N 个完整回合。不同身份可以并发。
 4. `ContextBuilder` 加载当前身份的上下文来源，生成本轮使用的 `PreparedContext`。
 5. `TurnRunner` 在每次模型请求前调用 `context.messages(output)`，将本轮新增内容一起纳入预算。
-6. AI SDK 校验模型发来的工具参数并执行已注册工具。Agent 可在同一回合调用发送工具和 Markdown 记忆工具。
-7. 模型给出最终回复后，会话模块把本次指令对话写成一个 SDK 回合并提交事务。记忆 Agent 的文件内容和工具参数只在本轮使用。
+6. Pi Agent Core 调用已注册工具，工具入口用 Zod 校验模型参数。Agent 可在同一回合调用发送工具和 Markdown 记忆工具。
+7. 模型给出最终回复后，会话模块把本次指令对话写成一个完整回合并提交事务。记忆 Agent 的文件内容和工具参数只在本轮使用。
 8. 接入模块发送最终回复。平台发送位于数据库事务之后；发送失败不会自动重做模型请求或外部工具。
 
 工具异常、模型请求失败、上下文超限或超过模型请求次数，都会使本轮数据库写入回滚。自然群聊可以通过 `send_message` 当场发送，指令回合在提交数据库事务后发送。记忆写入通过独立的后台队列执行，和 SQL 事务的生命周期分开。
@@ -48,12 +48,12 @@ flowchart TD
 
 - `system`：人格与行为设定，由上下文构建器提供。
 - `user`：用户消息；上下文来源以带名称的参考资料消息提供。
-- `assistant`：模型文本，也可携带 AI SDK 的 `tool-call` 内容。
+- `assistant`：模型文本，也可携带 `tool-call` 内容。
 - `tool`：工具结果，通过 `toolCallId` 关联模型调用。
 
 一个回合从一条用户消息开始，到最终 assistant 回复结束，中间可以有多个工具调用与结果。`CHAT_HISTORY_TURNS` 按完整回合计算，而非按消息条数计算。
 
-迁移 `003-sdk-turns` 清除旧指令会话，使用 `conversation_turns.messages` 的 JSONB 数组保存 SDK 消息。人格、参考资料和本次裁剪结果不写入指令记录。
+迁移 `003-sdk-turns` 建立了现有的 JSONB 消息格式。Pi Agent Core 在请求时读取该格式，历史回合可直接复用。人格、参考资料和本次裁剪结果不写入指令记录。
 
 目前身份直接绑定一条会话，`/reset` 清除这条会话的消息。跨服务实例恢复依赖 PostgreSQL，不依赖内存缓存。
 

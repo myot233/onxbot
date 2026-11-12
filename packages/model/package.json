@@ -8,11 +8,16 @@
       "development": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./trace": {
+      "development": "./src/trace.ts",
+      "types": "./dist/trace.d.ts",
+      "import": "./dist/trace.js"
     }
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "^3.0.85",
-    "ai": "^7.0.163",
+    "@earendil-works/pi-agent-core": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
     "zod": "^4.6.7"
   },
   "scripts": {

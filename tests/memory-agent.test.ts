@@ -10,7 +10,7 @@ import {
   TurnRunner,
 } from '../packages/core/src/index.js';
 import type { ModelMessage } from '../packages/model/src/index.js';
-import { sdkModel, sdkResult } from './helpers/model.js';
+import { piModel, piResult } from './helpers/model.js';
 
 vi.mock('node:fs/promises', async (original) => {
   const fs = await original<typeof import('node:fs/promises')>();
@@ -24,8 +24,8 @@ it('keeps an ambient group turn silent when it only writes memory', async () => 
   const send = vi.fn(async () => true);
   let step = 0;
   const sentAt = '2026-11-06T16:35:18.000Z';
-  const model = sdkModel(({ prompt }) => {
-    if (step++ > 0) return sdkResult([{ type: 'text', text: '记忆已保存。' }]);
+  const model = piModel(({ prompt }) => {
+    if (step++ > 0) return piResult([{ type: 'text', text: '记忆已保存。' }]);
     expect(JSON.stringify(prompt)).toContain('2026-11-07T00:35:18.000+08:00');
     return call('write_memory', { filename: '会议.md', content: '周二见。' });
   });
@@ -63,7 +63,7 @@ const prompt = {
 };
 
 function call(name: string, input: object = {}, id = name) {
-  return sdkResult(
+  return piResult(
     [
       {
         type: 'tool-call',
@@ -76,7 +76,7 @@ function call(name: string, input: object = {}, id = name) {
   );
 }
 
-it('sends from the same SDK run while a Markdown write is blocked', async () => {
+it('sends from the same agent run while a Markdown write is blocked', async () => {
   const root = await mkdtemp(join(tmpdir(), 'onxbot-memory-'));
   const errors = vi.fn();
   const memory = new MarkdownMemory(root, errors);
@@ -93,7 +93,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
   let step = 0;
   const agent = new ConversationAgent(
     new TurnRunner(
-      sdkModel(({ prompt: messages }) => {
+      piModel(({ prompt: messages }) => {
         switch (step++) {
           case 0:
             return call('write_memory', {
@@ -104,7 +104,7 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
             expect(JSON.stringify(messages.at(-1))).toContain('后台写入队列');
             return call('send_message', { text: '周二见。' });
           default:
-            return sdkResult([]);
+            return piResult([]);
         }
       }),
     ),
@@ -137,19 +137,19 @@ it('sends from the same SDK run while a Markdown write is blocked', async () => 
       let step = 0;
       const reader = new ConversationAgent(
         new TurnRunner(
-          sdkModel(({ prompt: messages }) => {
+          piModel(({ prompt: messages }) => {
             if (step++ === 0) return call('list_memory');
             const output = JSON.stringify(messages.at(-1));
             if (step === 2) {
               if (kind === 'user') {
                 expect(output).not.toContain('会议.md');
-                return sdkResult([{ type: 'text', text: '没有用户记忆。' }]);
+                return piResult([{ type: 'text', text: '没有用户记忆。' }]);
               }
               expect(output).toContain('会议.md');
               return call('read_memory', { filename: '会议.md' });
             }
             expect(output).toContain('周二见。');
-            return sdkResult([{ type: 'text', text: '会议在周二。' }]);
+            return piResult([{ type: 'text', text: '会议在周二。' }]);
           }),
         ),
         reloaded,
@@ -175,7 +175,7 @@ it('reports failed writes at flush and continues processing queued notes', async
   let step = 0;
   const agent = new ConversationAgent(
     new TurnRunner(
-      sdkModel(() => {
+      piModel(() => {
         switch (step++) {
           case 0:
             return call('write_memory', {
@@ -188,7 +188,7 @@ it('reports failed writes at flush and continues processing queued notes', async
               content: '周二见',
             });
           default:
-            return sdkResult([{ type: 'text', text: '已记录' }]);
+            return piResult([{ type: 'text', text: '已记录' }]);
         }
       }),
     ),
@@ -238,7 +238,7 @@ it('lists a queued note even when it lands between directory enumeration and the
   let step = 0;
   const agent = new ConversationAgent(
     new TurnRunner(
-      sdkModel(async ({ prompt }) => {
+      piModel(async ({ prompt }) => {
         switch (step++) {
           case 0:
             return call('write_memory', {
@@ -250,7 +250,7 @@ it('lists a queued note even when it lands between directory enumeration and the
             return call('list_memory');
           default:
             expect(JSON.stringify(prompt.at(-1))).toContain('club.md');
-            return sdkResult([{ type: 'text', text: 'Done' }]);
+            return piResult([{ type: 'text', text: 'Done' }]);
         }
       }),
     ),
@@ -275,7 +275,7 @@ it('replaces copied metadata with one storage footer on repeated writes', async 
   let staged = '';
   const agent = new ConversationAgent(
     new TurnRunner(
-      sdkModel(({ prompt }) => {
+      piModel(({ prompt }) => {
         switch (step++) {
           case 0:
             return call('write_memory', {
@@ -298,7 +298,7 @@ it('replaces copied metadata with one storage footer on repeated writes', async 
             });
           }
           default:
-            return sdkResult([{ type: 'text', text: 'Done' }]);
+            return piResult([{ type: 'text', text: 'Done' }]);
         }
       }),
     ),
@@ -328,14 +328,14 @@ it('rejects a metadata-only note without creating a file', async () => {
   let step = 0;
   const agent = new ConversationAgent(
     new TurnRunner(
-      sdkModel(({ prompt }) => {
+      piModel(({ prompt }) => {
         if (step++ === 0)
           return call('write_memory', {
             filename: 'empty.md',
             content: 'Recorded at: 2026-01-02T09:30+08:00',
           });
         expect(JSON.stringify(prompt.at(-1))).toContain('记忆正文为空');
-        return sdkResult([{ type: 'text', text: 'Done' }]);
+        return piResult([{ type: 'text', text: 'Done' }]);
       }),
     ),
     memory,
@@ -360,23 +360,23 @@ it('sends each short group reply separately and in order', async () => {
     index === 0 ? first : true,
   );
   let step = 0;
-  const model = sdkModel(({ prompt }) => {
+  const model = piModel(({ prompt }) => {
     switch (step++) {
       case 0:
-        return sdkResult(
-          [
+        return {
+          content: [
             ...call('send_message', { text: '可以。' }, 'send-1').content,
             ...call('send_message', { text: '周二见。' }, 'send-2').content,
           ],
-          'tool-calls',
-        );
+          stopReason: 'toolUse',
+        };
       case 1:
         expect(JSON.stringify(prompt.at(-1))).toContain('消息已发出');
         return call('list_memory');
       case 2:
         return call('send_message', { text: '带上会议记录。' }, 'send-3');
       default:
-        return sdkResult([]);
+        return piResult([]);
     }
   });
   const group = new GroupChat(model, {
@@ -420,7 +420,7 @@ it('starts a scheduled topic from restored context without receiving live messag
   const memory = new MarkdownMemory(root, vi.fn());
   const send = vi.fn(async () => true);
   let step = 0;
-  const model = sdkModel(({ prompt }) => {
+  const model = piModel(({ prompt }) => {
     if (step++ === 0) {
       expect(JSON.stringify(prompt)).toContain('scheduled_topic');
       expect(JSON.stringify(prompt)).toContain('周二');
@@ -428,7 +428,7 @@ it('starts a scheduled topic from restored context without receiving live messag
         text: '周二已经有咖啡味了',
       });
     }
-    return sdkResult([]);
+    return piResult([]);
   });
   const group = new GroupChat(model, {
     systemPrompt: 'Be concise.',
@@ -455,10 +455,10 @@ it('saves group facts and member preferences silently in isolated scopes', async
   const errors = vi.fn();
   const memory = new MarkdownMemory(root, errors);
   const send = vi.fn(async () => true);
-  const model = sdkModel(({ prompt }) => {
-    if (prompt.at(-1)?.role === 'tool') return sdkResult([]);
-    return sdkResult(
-      [
+  const model = piModel(({ prompt }) => {
+    if (prompt.at(-1)?.role === 'tool') return piResult([]);
+    return {
+      content: [
         ...call(
           'write_memory',
           { scope: 'group', filename: '活动.md', content: '每周二读书会。' },
@@ -470,8 +470,8 @@ it('saves group facts and member preferences silently in isolated scopes', async
           'member-write',
         ).content,
       ],
-      'tool-calls',
-    );
+      stopReason: 'toolUse',
+    };
   });
   const group = new GroupChat(model, {
     systemPrompt: 'Be concise.',
@@ -494,14 +494,14 @@ it('saves group facts and member preferences silently in isolated scopes', async
     async function list(scope: MemoryScope, requested: 'group' | 'user') {
       const reader = new ConversationAgent(
         new TurnRunner(
-          sdkModel(({ prompt }) => {
+          piModel(({ prompt }) => {
             const result = prompt.at(-1);
             if (result?.role !== 'tool')
               return call('list_memory', { scope: requested });
             const part = result.content[0];
             if (part?.type !== 'tool-result' || part.output.type !== 'text')
               throw new Error('Expected memory filenames.');
-            return sdkResult([{ type: 'text', text: part.output.value }]);
+            return piResult([{ type: 'text', text: part.output.value }]);
           }),
         ),
         memory,

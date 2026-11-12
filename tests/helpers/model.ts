@@ -1,46 +1,52 @@
-import { MockLanguageModelV4 } from 'ai/test';
-import {
-  createSdkModelProvider,
-  type ModelResponse,
+import type {
+  ModelResponse,
+  ModelTrace,
 } from '../../packages/model/src/index.js';
+import { parseToolArguments } from '../../packages/model/src/pi-messages.js';
+import { createPiModelProvider } from '../../packages/model/src/pi-provider.js';
 
-type Generate = MockLanguageModelV4['doGenerate'];
-type Generated = Awaited<ReturnType<Generate>>;
+type Complete = Parameters<typeof createPiModelProvider>[1];
+type Generated = Awaited<ReturnType<Complete>>;
+type StepRequest = Parameters<Complete>[0];
 
 export const samplePng = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7p8AAAAASUVORK5CYII=',
   'base64',
 );
 
-export function sdkModel(
-  generate: (
-    options: Parameters<Generate>[0],
-  ) => Generated | Promise<Generated>,
+export function piModel(
+  generate: (request: {
+    prompt: StepRequest['messages'];
+    tools: StepRequest['tools'];
+  }) => ReturnType<Complete>,
+  trace?: ModelTrace,
 ) {
-  return createSdkModelProvider(
-    new MockLanguageModelV4({
-      doGenerate: async (options) => generate(options),
-    }),
+  return createPiModelProvider(
+    'test-model',
+    ({ messages, tools }) => generate({ prompt: messages, tools }),
+    trace,
   );
 }
 
-export function sdkResult(
-  content: Generated['content'],
+export function piResult(
+  content: (
+    | { type: 'text'; text: string }
+    | { type: 'tool-call'; toolCallId: string; toolName: string; input: string }
+  )[],
   reason: 'stop' | 'tool-calls' = 'stop',
 ): Generated {
   return {
-    content,
-    finishReason: { unified: reason, raw: undefined },
-    usage: {
-      inputTokens: {
-        total: 1,
-        noCache: 1,
-        cacheRead: undefined,
-        cacheWrite: undefined,
-      },
-      outputTokens: { total: 1, text: 1, reasoning: undefined },
-    },
-    warnings: [],
+    content: content.map((part) =>
+      part.type === 'text'
+        ? part
+        : {
+            type: 'toolCall',
+            id: part.toolCallId,
+            name: part.toolName,
+            arguments: parseToolArguments(JSON.parse(part.input)),
+          },
+    ),
+    stopReason: reason === 'tool-calls' ? 'toolUse' : 'stop',
   };
 }
 

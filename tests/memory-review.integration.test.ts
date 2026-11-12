@@ -13,7 +13,7 @@ import {
   createGroupMemoryReviewStore,
 } from '../packages/database/src/index.js';
 import { createTestDatabase } from './helpers/database.js';
-import { sdkModel, sdkResult } from './helpers/model.js';
+import { piModel, piResult } from './helpers/model.js';
 
 it('leases durable review batches and checkpoints only the claimed messages', async () => {
   const fixture = await createTestDatabase();
@@ -108,12 +108,12 @@ it('reviews multiple members with memory-only tools and waits for file writes be
     ['finish_review', {}],
   ] as const;
   let step = 0;
-  const model = sdkModel(({ prompt, tools }) => {
+  const model = piModel(({ prompt, tools }) => {
     expect(tools?.map((t) => t.name)).not.toContain('send_message');
     expect(JSON.stringify(prompt)).toContain('2026-11-07T10:51:08.000+08:00');
     const call = calls[step++];
-    if (!call) return sdkResult([{ type: 'text', text: 'REVIEW_COMPLETE' }]);
-    return sdkResult(
+    if (!call) return piResult([{ type: 'text', text: 'REVIEW_COMPLETE' }]);
+    return piResult(
       [
         {
           type: 'tool-call',

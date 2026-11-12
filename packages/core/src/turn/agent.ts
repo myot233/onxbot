@@ -56,7 +56,7 @@ export class ConversationAgent {
           selected = selected ? `${selected}\n${text}` : text;
           return '消息已发出。';
         });
-        // The SDK may execute multiple tool calls from one model step concurrently.
+        // Pi may execute multiple tool calls from one model step concurrently.
         sending = delivery.then(
           () => {},
           () => {},

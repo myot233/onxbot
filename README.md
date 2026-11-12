@@ -79,7 +79,7 @@ OPENAI_API_KEY=你的密钥
 OPENAI_MODEL=你的模型名称
 ```
 
-模型请求和工具循环由 Vercel AI SDK 执行，支持 OpenAI 兼容的 `/chat/completions`。 使用 DeepSeek 时可设 `DEEPSEEK_REASONING_EFFORT=high` 启用高强度推理。工具回合会按协议回传推理内容，观测面板只标记该内容已隐藏。`OPENAI_BASE_URL` 应设置为服务商的 API 基地址。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
+工具循环由 Pi Agent Core 执行，模型适配器支持 OpenAI 兼容的 `/chat/completions` JSON 接口。 使用 DeepSeek 时可设 `DEEPSEEK_REASONING_EFFORT=high` 启用高强度推理。工具回合会按协议回传推理内容，观测面板只标记该内容已隐藏。`OPENAI_BASE_URL` 应设置为服务商的 API 基地址。模型生成的回复正文作为普通文本发送，群聊提及由消息适配器根据触发消息的发送者生成。
 
 ### QQ 原生工具
 
@@ -158,7 +158,7 @@ TEST_DATABASE_URL=postgresql://onxbot:onxbot_dev@127.0.0.1:5432/onxbot pnpm test
 
 ## 存储行为
 
-每次成功的指令对话按完整回合原子写入 AI SDK 消息。同一会话通过 PostgreSQL 行锁串行处理，不同会话可并发。记忆 Agent 的文件读取内容和工具参数只在本轮使用，指令历史只保存用户正文和实际回复。
+每次成功的指令对话按完整回合原子写入会话消息。同一会话通过 PostgreSQL 行锁串行处理，不同会话可并发。记忆 Agent 的文件读取内容和工具参数只在本轮使用，指令历史只保存用户正文和实际回复。
 
 当前实现会在整个指令回合期间持有事务及连接，连接池上限为 10。`CHAT_HISTORY_TURNS` 限制完整历史回合数。`ContextBuilder` 提供可选 token 预算接口。历史记录持续保存在数据库，直到 `/reset` 删除。`CHAT_MAX_INPUT_CHARS` 限制单条输入长度，`CHAT_TIMEOUT_MS` 限制每步模型请求时间，`TurnRunner` 默认最多请求模型 8 次。
 
