@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import { createQqTools, type QqRequest } from '../apps/bot/src/qq-tools.js';
 import { TurnRunner } from '../packages/core/src/index.js';
-import { sdkModel, sdkResult } from './helpers/model.js';
+import { piModel, piResult } from './helpers/model.js';
 
 it('binds QQ calls to the turn and rejects a quoted message from another group', async () => {
   const request = vi.fn<QqRequest>(async (action, params) => {
@@ -46,10 +46,10 @@ it('binds QQ calls to the turn and rejects a quoted message from another group',
     quoteId: '98',
   });
   let step = 0;
-  const model = sdkModel(({ prompt }) => {
+  const model = piModel(({ prompt }) => {
     const output = JSON.stringify(prompt.at(-1));
     const call = (toolName: string, input: object) =>
-      sdkResult(
+      piResult(
         [
           {
             type: 'tool-call',
@@ -78,7 +78,7 @@ it('binds QQ calls to the turn and rejects a quoted message from another group',
         return call('qq_poke', { userId: '999' });
       default:
         expect(output).toContain('already used a QQ interaction');
-        return sdkResult([{ type: 'text', text: '查到了' }]);
+        return piResult([{ type: 'text', text: '查到了' }]);
     }
   });
   const runner = new TurnRunner(model, { tools });

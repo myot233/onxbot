@@ -3,15 +3,13 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MockLanguageModelV4 } from 'ai/test';
 import { expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { traceIndexSchema } from '../apps/dashboard/src/contract.js';
 import { createDashboardServer } from '../apps/dashboard/src/server.js';
 import { TraceRecorder } from '../apps/dashboard/src/traces.js';
 import { defineTool, TurnRunner } from '../packages/core/src/index.js';
-import { createSdkModelProvider } from '../packages/model/src/index.js';
-import { sdkResult } from './helpers/model.js';
+import { piModel, piResult } from './helpers/model.js';
 import { memoryTraceStore } from './helpers/traces.js';
 
 it('shows actual per-step tool context only on authenticated, session-filtered requests', async () => {
@@ -19,27 +17,22 @@ it('shows actual per-step tool context only on authenticated, session-filtered r
   const buffer = new TraceRecorder(store, (error) => {
     throw error;
   });
-  const model = createSdkModelProvider(
-    new MockLanguageModelV4({
-      async doGenerate({ prompt }) {
-        if (prompt.at(-1)?.role !== 'tool') {
-          return sdkResult(
-            [
-              {
-                type: 'tool-call',
-                toolName: 'read_memory',
-                toolCallId: 'read-1',
-                input: '{}',
-              },
-            ],
-            'tool-calls',
-          );
-        }
-        return sdkResult([{ type: 'text', text: 'See you Tuesday.' }]);
-      },
-    }),
-    { trace: buffer.record },
-  );
+  const model = piModel(({ prompt }) => {
+    if (prompt.at(-1)?.role !== 'tool') {
+      return piResult(
+        [
+          {
+            type: 'tool-call',
+            toolName: 'read_memory',
+            toolCallId: 'read-1',
+            input: '{}',
+          },
+        ],
+        'tool-calls',
+      );
+    }
+    return piResult([{ type: 'text', text: 'See you Tuesday.' }]);
+  }, buffer.record);
   const runner = new TurnRunner(model, {
     tools: [
       defineTool({

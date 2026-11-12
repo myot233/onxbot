@@ -7,7 +7,7 @@ This repository is a TypeScript ESM monorepo for a QQ conversation bot. Use Node
 - `apps/bot` assembles configuration, the model, PostgreSQL stores, Koishi, the observation panel, web research, and Croner jobs.
 - `apps/dashboard` owns the React/Vite shadcn UI, read-only observation API, and asynchronous trace recorder. PostgreSQL owns trace summaries and ordered events; the shared telemetry contract lives in `packages/model/src/trace.ts`. React renders trace contents as text. Keep dashboard view contracts in `src/contract.ts`; authentication is opt-in through `OBSERVE_PASSWORD`.
 - `packages/core` owns conversation context, group participation, agent tools, Markdown memory, and memory review. Accept external dependencies through existing interfaces.
-- `packages/model` adapts the Vercel AI SDK and model providers. Keep provider-specific options and model-message validation here.
+- `packages/model` adapts Pi Agent Core and model providers. Keep provider-specific options and model-message validation here.
 - `packages/database` implements persistence with Kysely and pg. Register new migrations in `src/migrate.ts`.
 - `packages/koishi-plugin-chat` translates QQ sessions into core inputs and delivers replies. Keep transport details in this adapter.
 
@@ -22,7 +22,7 @@ Turborepo runs workspace builds in dependency order and caches `dist` plus TypeS
 - Use `@date-fns/tz` through `chatTimestamp` for model-visible Asia/Shanghai times. Preserve stored instants and explicit offsets. Unknown historical times stay unknown.
 - Use `renderGroupLine` when presenting group metadata to a model and the Koishi session timestamp helper when receiving messages.
 - Use p-queue for serialized background memory writes and Croner for both proactive-topic and memory-review wakeups. Stop the jobs and drain in-flight work on shutdown; PostgreSQL owns their due times and progress.
-- Use Effect for memory-review orchestration and typed stage errors. Compose effects internally and run them at the Promise entry point. Keep existing AI SDK, Kysely, Koishi, and Zod interfaces. Promise operations without cancellation support must settle before interruption releases their batch. Preserve both task and cleanup failures. Database scheduling owns retries; do not replay the full review or message delivery with an automatic Effect retry.
+- Use Effect for memory-review orchestration and typed stage errors. Compose effects internally and run them at the Promise entry point. Keep the existing model provider, Kysely, Koishi, and Zod interfaces. Promise operations without cancellation support must settle before interruption releases their batch. Preserve both task and cleanup failures. Database scheduling owns retries; do not replay the full review or message delivery with an automatic Effect retry.
 - Use Kysely transactions and row locks for durable claims and checkpoints. For background jobs, keep model requests and filesystem writes outside database transactions. Preserve the existing serialization of live conversations.
 
 Before adding a dependency, check its official documentation, runtime compatibility, maintenance, and overlap with installed libraries. Add runtime dependencies to the workspace package that imports them, then update the lockfile. Use native APIs for straightforward operations.

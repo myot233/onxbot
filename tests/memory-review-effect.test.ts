@@ -7,7 +7,7 @@ import {
   TurnRunner,
 } from '../packages/core/src/index.js';
 import type { ModelProvider } from '../packages/model/src/index.js';
-import { sdkModel, sdkResult, textReply } from './helpers/model.js';
+import { piModel, piResult, textReply } from './helpers/model.js';
 
 const batch: GroupMemoryBatch = {
   botId: '100',
@@ -29,9 +29,9 @@ function fixture(model?: ModelProvider) {
   const review = new MemoryReview(
     new TurnRunner(
       model ??
-        sdkModel(() =>
+        piModel(() =>
           step++ === 0
-            ? sdkResult(
+            ? piResult(
                 [
                   {
                     type: 'tool-call',
@@ -42,7 +42,7 @@ function fixture(model?: ModelProvider) {
                 ],
                 'tool-calls',
               )
-            : sdkResult([{ type: 'text', text: 'REVIEW_COMPLETE' }]),
+            : piResult([{ type: 'text', text: 'REVIEW_COMPLETE' }]),
         ),
     ),
     memory,

@@ -42,11 +42,7 @@ export class TurnRunner {
     const tools = this.options.tools;
     const result = await this.model.generate({
       messages: context.messages(),
-      ...(tools?.length && {
-        tools: Object.fromEntries(
-          tools.map(({ name, implementation }) => [name, implementation]),
-        ),
-      }),
+      ...(tools?.length && { tools }),
       maxSteps: this.options.maxModelCalls ?? 8,
       prepareMessages: (output) => context.messages(output),
     });

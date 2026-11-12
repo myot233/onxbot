@@ -3,7 +3,7 @@ import { readFile, realpath } from 'node:fs/promises';
 import { createServer, type ServerResponse } from 'node:http';
 import { dirname, extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type TraceStore, traceQuerySchema } from '@onxbot/model';
+import { type TraceStore, traceQuerySchema } from '@onxbot/model/trace';
 import { z } from 'zod';
 import type { MemoryDocuments } from './contract.js';
 

@@ -8,7 +8,7 @@ import {
   MarkdownMemory,
   TurnRunner,
 } from '../packages/core/src/index.js';
-import { sdkModel, sdkResult } from './helpers/model.js';
+import { piModel, piResult } from './helpers/model.js';
 
 it('searches and reads a result in one agent turn with a bounded request budget', async () => {
   const url = 'https://example.org/memes';
@@ -22,10 +22,10 @@ it('searches and reads a result in one agent turn with a bounded request budget'
   const root = await mkdtemp(join(tmpdir(), 'onxbot-web-'));
   const memory = new MarkdownMemory(root, vi.fn());
   let step = 0;
-  const model = sdkModel(({ prompt }) => {
+  const model = piModel(({ prompt }) => {
     const result = JSON.stringify(prompt.at(-1));
     const call = (toolName: string, input: object) =>
-      sdkResult(
+      piResult(
         [
           {
             type: 'tool-call',
@@ -54,7 +54,7 @@ it('searches and reads a result in one agent turn with a bounded request budget'
         expect(result).toContain('网页检索额度已用完');
         return call('send_message', { text: '这个梗是说终于等到了。' });
       default:
-        return sdkResult([]);
+        return piResult([]);
     }
   });
   try {
@@ -105,10 +105,10 @@ it.each([true, false])(
     const request = vi.fn<typeof fetch>(async () =>
       Response.json({ results: [] }),
     );
-    const model = sdkModel(({ prompt }) =>
+    const model = piModel(({ prompt }) =>
       prompt.at(-1)?.role === 'tool'
-        ? sdkResult([{ type: 'text', text: '还没查到这个说法。' }])
-        : sdkResult(
+        ? piResult([{ type: 'text', text: '还没查到这个说法。' }])
+        : piResult(
             [
               {
                 type: 'tool-call',
